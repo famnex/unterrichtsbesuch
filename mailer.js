@@ -212,11 +212,11 @@ async function sendUBAssignedMails(userEmail, userName, slEmail, slName, ubDetai
         console.error('Fehler beim Generieren der ICS-Datei:', err);
     }
 
-    // 2. Mail an Schulleitungsmitglied (mit interaktivem Kalender-Event & klassischem ICS-Anhang)
+    // 2. Mail an Schulleitungsmitglied
     const slSubject = `Begleitung Unterrichtsbesuch: ${ubDetails.subject} (${ubDetails.grade}) - ${userName}`;
     const slText = `Hallo ${slName},
 
-du wurdest als Begleitung for den folgenden Unterrichtsbesuch eingetragen bzw. hast diesen übernommen:
+du wurdest als Begleitung für den folgenden Unterrichtsbesuch eingetragen bzw. hast diesen übernommen:
 
 Lehrkraft: ${userName}
 Datum/Uhrzeit: ${dateFormatted}
@@ -226,8 +226,6 @@ Klasse: ${ubDetails.grade}
 Art: ${ubDetails.type}
 Fachleiter: ${ubDetails.instructor || 'Nicht angegeben'}
 Modul: ${ubDetails.module || 'Nicht angegeben'}
-
-Im Anhang findest du eine Kalenderdatei (.ics), mit der du den Termin in deinen persönlichen Kalender eintragen kannst.
 
 Freundliche Grüße,
 Dein Unterrichtsbesuchs-Portal`;
@@ -244,20 +242,11 @@ Dein Unterrichtsbesuchs-Portal`;
             <div class="details-row"><div class="details-label">Fachleiter:</div><div class="details-value">${ubDetails.instructor || 'Nicht angegeben'}</div></div>
             <div class="details-row"><div class="details-label">Modul:</div><div class="details-value">${ubDetails.module || 'Nicht angegeben'}</div></div>
         </div>
-        <p>Outlook, Gmail und andere Clients sollten Ihnen diesen Termin direkt oben als interaktive Kalendereinladung (Zusagen/Ablehnen) anzeigen. Alternativ können Sie die beigefügte .ics-Datei öffnen.</p>
+        <p>Outlook, Gmail und andere Clients sollten Ihnen diesen Termin direkt oben als interaktive Kalendereinladung (Zusagen/Ablehnen) anzeigen.</p>
         <p>Freundliche Grüße,<br>Dein Unterrichtsbesuchs-Portal</p>
     `;
 
     const slHtml = getHtmlTemplate('Terminbegleitung zugewiesen', slName, slHtmlContent);
-
-    const slAttachments = [];
-    if (icsContent) {
-        slAttachments.push({
-            filename: 'unterrichtsbesuch.ics',
-            content: icsContent,
-            contentType: 'text/calendar'
-        });
-    }
 
     // 3. Mail an Benutzer
     const userSubject = `Begleitung für deinen Unterrichtsbesuch am ${new Date(ubDetails.date_time).toLocaleDateString('de-DE')}`;
@@ -302,14 +291,15 @@ Dein Unterrichtsbesuchs-Portal`;
                 to: slEmail,
                 subject: slSubject,
                 text: slText,
-                html: slHtml,
-                attachments: slAttachments
+                html: slHtml
+                // WICHTIG: Redundantes Attachment entfernt! Nodemailer baut durch das Vorhandensein 
+                // von icalEvent die Kalenderdatei automatisch perfekt in den MIME-Tree ein.
+                // Das verhindert Multipart-MIME-Konflikte bei Exchange.
             };
 
             if (icsContent) {
                 slMailConfig.icalEvent = {
-                    filename: 'unterrichtsbesuch.ics',
-                    method: 'request',
+                    method: 'REQUEST', // Nodemailer empfiehlt Großbuchstaben
                     content: icsContent
                 };
             }
@@ -420,7 +410,6 @@ Dein Unterrichtsbesuchs-Portal`;
             const description = `Dieser Termin wurde abgesagt.`;
             const location = `Raum ${ubDetails.room}`;
             
-            // WICHTIG: Lehrkraft als Organizer übergeben
             const organizer = (userEmail && userEmail.trim()) ? { name: userName, email: userEmail } : null;
             const icsCancelContent = await generateICS(title, description, location, ubDetails.date_time, organizer);
             cancelIcs = icsCancelContent.replace('METHOD:REQUEST', 'METHOD:CANCEL').replace('STATUS:CONFIRMED', 'STATUS:CANCELLED');
@@ -467,8 +456,7 @@ Dein Unterrichtsbesuchs-Portal`;
             
             if (cancelIcs) {
                 mailConfig.icalEvent = {
-                    filename: 'stornierung.ics',
-                    method: 'cancel',
+                    method: 'CANCEL', // Großbuchstaben
                     content: cancelIcs
                 };
             }
