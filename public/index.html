@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unterrichtsbesuche-Verwaltung</title>
+    <!-- Google Fonts: Outfit -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Lucide Icons CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- Setup View (Wird angezeigt, wenn is_setup_completed = false) -->
+    <div id="setup-view" class="auth-container hidden">
+        <div class="glass-card auth-card">
+            <h2>🚀 First-Run Setup</h2>
+            <p class="subtitle">Konfigurieren Sie die globalen SMTP- und JWT-Einstellungen, um die Anwendung zu initialisieren.</p>
+            <form id="setup-form">
+                <div class="form-group-title">SMTP-Einstellungen (E-Mail-Benachrichtigungen)</div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="setup-smtp-host">SMTP-Host</label>
+                        <input type="text" id="setup-smtp-host" placeholder="smtp.example.com" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="setup-smtp-port">Port</label>
+                        <input type="number" id="setup-smtp-port" placeholder="587" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="setup-smtp-user">Benutzername</label>
+                        <input type="text" id="setup-smtp-user" placeholder="user@example.com" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="setup-smtp-pass">Passwort</label>
+                        <input type="password" id="setup-smtp-pass" placeholder="••••••••" required>
+                    </div>
+                    <div class="form-group full-width">
+                        <label for="setup-smtp-from">Absender-Adresse</label>
+                        <input type="email" id="setup-smtp-from" placeholder="noreply@schule.de" required>
+                    </div>
+                </div>
+
+                <div class="form-group-title">JWT-Claim-Mapping</div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="setup-jwt-username">Benutzername Claim</label>
+                        <input type="text" id="setup-jwt-username" value="username" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="setup-jwt-name">Klarname Claim</label>
+                        <input type="text" id="setup-jwt-name" value="name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="setup-jwt-email">E-Mail Claim</label>
+                        <input type="text" id="setup-jwt-email" value="email" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="setup-jwt-secret">JWT Secret (Optional)</label>
+                        <input type="password" id="setup-jwt-secret" placeholder="Optional: Falls Signatur lokal verifiziert wird">
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary full-width">
+                    <i data-lucide="save"></i> Setup abschließen & Speichern
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Login View (JWT Eingabe) -->
+    <div id="login-view" class="auth-container hidden">
+        <div class="glass-card auth-card">
+            <div class="logo-area">
+                <i data-lucide="graduation-cap" class="logo-icon"></i>
+                <h1>Schul-Portal</h1>
+            </div>
+            <h2>Authentifizierung erforderlich</h2>
+            <p class="subtitle">Geben Sie das vom Identity Provider bereitgestellte JWT ein, um sich anzumelden.</p>
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="jwt-token">JWT Token</label>
+                    <textarea id="jwt-token" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." required></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary full-width">
+                    <i data-lucide="log-in"></i> Anmelden
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Main Layout (Navbar + Dashboard) -->
+    <div id="main-view" class="hidden">
+        <!-- Header / Navbar -->
+        <header class="navbar">
+            <div class="nav-brand">
+                <i data-lucide="graduation-cap"></i>
+                <span>UB-Portal</span>
+            </div>
+            <nav class="nav-links">
+                <button id="nav-teacher-dashboard" class="nav-btn active">
+                    <i data-lucide="calendar"></i> Dashboard
+                </button>
+                <button id="nav-sl-dashboard" class="nav-btn hidden">
+                    <i data-lucide="users"></i> Schulleitung
+                </button>
+                <button id="nav-admin" class="nav-btn hidden">
+                    <i data-lucide="settings-2"></i> Administration
+                </button>
+            </nav>
+            <div class="user-profile">
+                <div class="user-info">
+                    <span id="user-display-name">Max Mustermann</span>
+                    <span id="user-role-badge" class="badge">Lehrkraft</span>
+                </div>
+                <button id="logout-btn" class="btn btn-icon btn-danger" title="Abmelden">
+                    <i data-lucide="log-out"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content Area -->
+        <main class="content-container">
+
+            <!-- VIEW 1: Lehrkraft Dashboard -->
+            <section id="view-teacher" class="dashboard-section">
+                <div class="section-header">
+                    <div>
+                        <h1>Meine Unterrichtsbesuche</h1>
+                        <p class="subtitle">Planen und verwalten Sie Ihre anstehenden Unterrichtsbesuche.</p>
+                    </div>
+                    <button id="btn-new-ub" class="btn btn-primary">
+                        <i data-lucide="plus-circle"></i> UB eintragen
+                    </button>
+                </div>
+
+                <!-- Tabs für Aktive vs Archivierte UBs -->
+                <div class="tab-container">
+                    <button class="tab-btn active" id="tab-active-ub">Zukünftige Besuche</button>
+                    <button class="tab-btn" id="tab-archived-ub">Das Archiv</button>
+                </div>
+
+                <!-- UB Liste (Karten) -->
+                <div id="ub-list-container" class="grid-container">
+                    <!-- Wird dynamisch befüllt -->
+                </div>
+            </section>
+
+            <!-- VIEW 2: Schulleitung Dashboard -->
+            <section id="view-sl" class="dashboard-section hidden">
+                <div class="section-header">
+                    <div>
+                        <h1>Schulübersicht Unterrichtsbesuche</h1>
+                        <p class="subtitle">Alle eingereichten Unterrichtsbesuche der Schule im Überblick.</p>
+                    </div>
+                </div>
+
+                <div class="glass-card table-wrapper">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Lehrkraft</th>
+                                <th>Datum & Uhrzeit</th>
+                                <th>Fach & Klasse</th>
+                                <th>Raum</th>
+                                <th>Art</th>
+                                <th>Ausbildung</th>
+                                <th>Entwurf</th>
+                                <th>Begleitung</th>
+                                <th>Aktionen</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sl-table-body">
+                            <!-- Wird dynamisch befüllt -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- VIEW 3: Admin Dashboard -->
+            <section id="view-admin" class="dashboard-section hidden">
+                <div class="section-header">
+                    <div>
+                        <h1>Administration & Einstellungen</h1>
+                        <p class="subtitle">Verwalten Sie globale SMTP/JWT-Parameter und weisen Sie Rollen zu.</p>
+                    </div>
+                </div>
+
+                <div class="admin-grid">
+                    <!-- Links: Einstellungs-Formular -->
+                    <div class="glass-card">
+                        <h3>🛠️ Systemeinstellungen</h3>
+                        <form id="admin-settings-form">
+                            <div class="form-group-title">SMTP-Einstellungen</div>
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label for="admin-smtp-host">SMTP-Host</label>
+                                    <input type="text" id="admin-smtp-host" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="admin-smtp-port">Port</label>
+                                    <input type="number" id="admin-smtp-port" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="admin-smtp-user">Benutzername</label>
+                                    <input type="text" id="admin-smtp-user" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="admin-smtp-pass">Passwort</label>
+                                    <input type="password" id="admin-smtp-pass" required>
+                                </div>
+                                <div class="form-group full-width">
+                                    <label for="admin-smtp-from">Absender-Adresse</label>
+                                    <input type="email" id="admin-smtp-from" required>
+                                </div>
+                            </div>
+
+                            <div class="form-group-title">JWT-Claim-Mapping</div>
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label for="admin-jwt-username">Benutzername Claim</label>
+                                    <input type="text" id="admin-jwt-username" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="admin-jwt-name">Klarname Claim</label>
+                                    <input type="text" id="admin-jwt-name" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="admin-jwt-email">E-Mail Claim</label>
+                                    <input type="text" id="admin-jwt-email" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="admin-jwt-secret">JWT Secret</label>
+                                    <input type="password" id="admin-jwt-secret" placeholder="Unverändert lassen, falls leer">
+                                </div>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary full-width">
+                                <i data-lucide="save"></i> Einstellungen aktualisieren
+                            </button>
+                        </form>
+                    </div>
+
+                    <!-- Rechts: Benutzermanagement -->
+                    <div class="glass-card">
+                        <h3>👥 Benutzermanagement</h3>
+                        <div class="table-wrapper">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Benutzername</th>
+                                        <th>Klarname</th>
+                                        <th>Rolle</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="admin-users-table-body">
+                                    <!-- Wird dynamisch befüllt -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- MODAL: UB anlegen / bearbeiten -->
+    <div id="ub-modal" class="modal hidden">
+        <div class="modal-content glass-card">
+            <div class="modal-header">
+                <h2 id="modal-title">Neuen Unterrichtsbesuch anlegen</h2>
+                <button class="btn-close" id="btn-close-modal">&times;</button>
+            </div>
+            <form id="ub-form">
+                <input type="hidden" id="ub-id">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="ub-date">Datum & Uhrzeit</label>
+                        <input type="datetime-local" id="ub-date" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="ub-room">Raum</label>
+                        <input type="text" id="ub-room" placeholder="z. B. A102" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="ub-subject">Fach</label>
+                        <input type="text" id="ub-subject" placeholder="z. B. Mathematik" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="ub-grade">Klasse</label>
+                        <input type="text" id="ub-grade" placeholder="z. B. 9b" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="ub-type">Art</label>
+                        <select id="ub-type" required>
+                            <option value="Unterrichtsbesuch">Unterrichtsbesuch (Standard)</option>
+                            <option value="Gemeinsamer Besuch">Gemeinsamer Besuch</option>
+                            <option value="Zweiter Unterrichtsbesuch">Zweiter Unterrichtsbesuch</option>
+                            <option value="Prüfungsbesuch">Prüfungsbesuch</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="ub-instructor">Fachleiter Seminar</label>
+                        <input type="text" id="ub-instructor" placeholder="z. B. Frau Müller">
+                    </div>
+                    <div class="form-group full-width">
+                        <label for="ub-module">Modul</label>
+                        <input type="text" id="ub-module" placeholder="z. B. Modul 4 - Kompetenzorientierter Unterricht">
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" id="btn-cancel-modal">Abbrechen</button>
+                    <button type="submit" class="btn btn-primary" id="btn-save-ub">Speichern</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: PDF Upload -->
+    <div id="upload-modal" class="modal hidden">
+        <div class="modal-content glass-card">
+            <div class="modal-header">
+                <h2>PDF-Entwurf hochladen</h2>
+                <button class="btn-close" id="btn-close-upload-modal">&times;</button>
+            </div>
+            <form id="upload-form">
+                <input type="hidden" id="upload-ub-id">
+                <div class="form-group">
+                    <label for="upload-file">Wählen Sie den Entwurf (nur PDF-Format)</label>
+                    <div class="file-drop-area">
+                        <i data-lucide="file-text" class="file-icon"></i>
+                        <input type="file" id="upload-file" accept="application/pdf" required>
+                        <span class="file-msg">Datei auswählen oder hierher ziehen</span>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" id="btn-cancel-upload-modal">Abbrechen</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i data-lucide="upload-cloud"></i> Datei hochladen
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

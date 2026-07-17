@@ -1,0 +1,20 @@
+{
+  "name": "unterrichtsbesuche-app",
+  "version": "1.0.0",
+  "description": "Verwaltung von Unterrichtsbesuchen mit JWT, SMTP und iCal-Workflow",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "ics": "^3.7.2",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "nodemailer": "^6.9.13",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7"
+  }
+}
