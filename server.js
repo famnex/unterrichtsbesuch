@@ -8,6 +8,7 @@ const { sendUBSubmittedMail, sendUBAssignedMails } = require('./mailer');
 
 const app = express();
 const PORT = process.env.PORT || 3022;
+const BASE_PATH = '/unterrichtsbesuch';
 
 // Ordner für Uploads erstellen, falls nicht vorhanden
 const uploadDir = path.join(__dirname, 'uploads');
@@ -37,9 +38,10 @@ const upload = multer({
     }
 });
 
-app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
-app.use('/uploads', express.static(uploadDir));
+// Router für den Unterpfad erstellen
+const router = express.Router();
+
+router.use(express.json());
 
 // Middleware zur Authentifizierung und JWT Claim-Mapping
 async function authMiddleware(req, res, next) {
@@ -108,7 +110,7 @@ async function authMiddleware(req, res, next) {
 }
 
 // API: Setup Status (ungeschützt für den First-Run Check)
-app.get('/api/setup-status', async (req, res) => {
+router.get('/api/setup-status', async (req, res) => {
     try {
         const db = await getDatabase();
         const settings = await db.get('SELECT is_setup_completed FROM settings WHERE id = 1');
@@ -120,7 +122,7 @@ app.get('/api/setup-status', async (req, res) => {
 });
 
 // API: Aktueller Benutzer & Setup Status
-app.get('/api/auth/me', authMiddleware, (req, res) => {
+router.get('/api/auth/me', authMiddleware, (req, res) => {
     res.json({
         user: req.user,
         is_setup_completed: !!req.settings.is_setup_completed
@@ -128,7 +130,7 @@ app.get('/api/auth/me', authMiddleware, (req, res) => {
 });
 
 // API: Settings abrufen
-app.get('/api/settings', authMiddleware, async (req, res) => {
+router.get('/api/settings', authMiddleware, async (req, res) => {
     // Nur Admin darf Settings sehen, außer das Setup ist noch nicht abgeschlossen
     if (req.user.role !== 'admin' && req.settings.is_setup_completed === 1) {
         return res.status(403).json({ error: 'Keine Berechtigung' });
@@ -143,7 +145,7 @@ app.get('/api/settings', authMiddleware, async (req, res) => {
 });
 
 // API: Settings speichern
-app.post('/api/settings', authMiddleware, async (req, res) => {
+router.post('/api/settings', authMiddleware, async (req, res) => {
     if (req.user.role !== 'admin' && req.settings.is_setup_completed === 1) {
         return res.status(403).json({ error: 'Keine Berechtigung' });
     }
@@ -191,7 +193,7 @@ app.post('/api/settings', authMiddleware, async (req, res) => {
 });
 
 // API: Benutzer auflisten (nur Admin)
-app.get('/api/users', authMiddleware, async (req, res) => {
+router.get('/api/users', authMiddleware, async (req, res) => {
     if (req.user.role !== 'admin') {
         return res.status(403).json({ error: 'Keine Berechtigung' });
     }
@@ -201,7 +203,7 @@ app.get('/api/users', authMiddleware, async (req, res) => {
 });
 
 // API: Benutzerrolle ändern (nur Admin)
-app.put('/api/users/:id/role', authMiddleware, async (req, res) => {
+router.put('/api/users/:id/role', authMiddleware, async (req, res) => {
     if (req.user.role !== 'admin') {
         return res.status(403).json({ error: 'Keine Berechtigung' });
     }
@@ -216,7 +218,7 @@ app.put('/api/users/:id/role', authMiddleware, async (req, res) => {
 });
 
 // API: Alle Schulleitungs-Mitglieder und Admins abrufen (für Dropdown)
-app.get('/api/schulleitung-users', authMiddleware, async (req, res) => {
+router.get('/api/schulleitung-users', authMiddleware, async (req, res) => {
     const db = await getDatabase();
     const slUsers = await db.all(
         "SELECT id, display_name FROM users WHERE role = 'schulleitung' OR role = 'admin'"
@@ -225,7 +227,7 @@ app.get('/api/schulleitung-users', authMiddleware, async (req, res) => {
 });
 
 // API: Unterrichtsbesuche abrufen
-app.get('/api/unterrichtsbesuche', authMiddleware, async (req, res) => {
+router.get('/api/unterrichtsbesuche', authMiddleware, async (req, res) => {
     const db = await getDatabase();
     let query = '';
     let params = [];
@@ -257,7 +259,7 @@ app.get('/api/unterrichtsbesuche', authMiddleware, async (req, res) => {
 });
 
 // API: Unterrichtsbesuch anlegen
-app.post('/api/unterrichtsbesuche', authMiddleware, async (req, res) => {
+router.post('/api/unterrichtsbesuche', authMiddleware, async (req, res) => {
     const { date_time, room, subject, grade, type, instructor, module, status } = req.body;
 
     if (!date_time || !room || !subject || !grade || !type) {
@@ -283,7 +285,7 @@ app.post('/api/unterrichtsbesuche', authMiddleware, async (req, res) => {
 });
 
 // API: Unterrichtsbesuch aktualisieren (Eintragen, Ändern oder Zuordnung)
-app.put('/api/unterrichtsbesuche/:id', authMiddleware, async (req, res) => {
+router.put('/api/unterrichtsbesuche/:id', authMiddleware, async (req, res) => {
     const db = await getDatabase();
     const ub = await db.get('SELECT * FROM unterrichtsbesuche WHERE id = ?', [req.params.id]);
 
@@ -362,7 +364,7 @@ app.put('/api/unterrichtsbesuche/:id', authMiddleware, async (req, res) => {
 });
 
 // API: Entwurf PDF-Upload
-app.post('/api/unterrichtsbesuche/:id/upload', authMiddleware, upload.single('entwurf'), async (req, res) => {
+router.post('/api/unterrichtsbesuche/:id/upload', authMiddleware, upload.single('entwurf'), async (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'Keine PDF-Datei hochgeladen.' });
     }
@@ -371,18 +373,15 @@ app.post('/api/unterrichtsbesuche/:id/upload', authMiddleware, upload.single('en
     const ub = await db.get('SELECT * FROM unterrichtsbesuche WHERE id = ?', [req.params.id]);
 
     if (!ub) {
-        // Datei löschen, falls UB nicht existiert
         fs.unlinkSync(req.file.path);
         return res.status(404).json({ error: 'Unterrichtsbesuch nicht gefunden.' });
     }
 
-    // Nur der Ersteller darf den Entwurf hochladen
     if (ub.user_id !== req.user.id) {
         fs.unlinkSync(req.file.path);
         return res.status(403).json({ error: 'Keine Berechtigung für diesen Upload.' });
     }
 
-    // Alten Entwurf löschen, falls vorhanden
     if (ub.file_path) {
         const oldFilePath = path.join(__dirname, ub.file_path);
         if (fs.existsSync(oldFilePath)) {
@@ -400,7 +399,24 @@ app.post('/api/unterrichtsbesuche/:id/upload', authMiddleware, upload.single('en
     res.json({ file_path: relativePath, message: 'PDF-Entwurf erfolgreich hochgeladen.' });
 });
 
+// Router in Express einbinden unter dem BASE_PATH
+app.use(BASE_PATH, router);
+
+// Statische Dateien und Uploads unter dem BASE_PATH ausliefern
+app.use(BASE_PATH, express.static(path.join(__dirname, 'public')));
+app.use(BASE_PATH + '/uploads', express.static(uploadDir));
+
+// Fallback: Weiterleitung von / auf /unterrichtsbesuch
+app.get('/', (req, res) => {
+    res.redirect(BASE_PATH + '/');
+});
+
+// Fallback für /unterrichtsbesuch (ohne abschließenden Slash)
+app.get(BASE_PATH, (req, res) => {
+    res.redirect(BASE_PATH + '/');
+});
+
 // Start des Servers
 app.listen(PORT, () => {
-    console.log(`Server läuft auf http://localhost:${PORT}`);
+    console.log(`Server läuft auf http://localhost:${PORT}${BASE_PATH}`);
 });

@@ -2,6 +2,8 @@
 let currentUser = null;
 let setupCompleted = false;
 
+const BASE_PATH = '/unterrichtsbesuch';
+
 function getToken() {
     return localStorage.getItem('ub_jwt_token');
 }
@@ -30,7 +32,7 @@ async function apiFetch(url, options = {}) {
     
     options.headers = headers;
     
-    const response = await fetch(url, options);
+    const response = await fetch(BASE_PATH + url, options);
     
     if (response.status === 401) {
         removeToken();
@@ -384,7 +386,7 @@ function renderTeacherUbs() {
                     ${ub.file_path ? `
                     <div class="ub-meta-item">
                         <i data-lucide="file-text" style="color: var(--success);"></i>
-                        <a href="/${ub.file_path}" target="_blank" style="color: var(--success); font-weight: 600; text-decoration: none;">PDF Entwurf öffnen</a>
+                        <a href="${BASE_PATH}/${ub.file_path}" target="_blank" style="color: var(--success); font-weight: 600; text-decoration: none;">PDF Entwurf öffnen</a>
                     </div>` : `
                     <div class="ub-meta-item">
                         <i data-lucide="file-warning" style="color: var(--warning);"></i>
@@ -514,7 +516,7 @@ document.getElementById('upload-form').addEventListener('submit', async (e) => {
 
     try {
         const token = getToken();
-        const res = await fetch(`/api/unterrichtsbesuche/${ubId}/upload`, {
+        const res = await fetch(`${BASE_PATH}/api/unterrichtsbesuche/${ubId}/upload`, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${token}`
@@ -582,7 +584,7 @@ function renderSLDashboard() {
         // Entwurfs-Link
         let pdfLink = '<span class="text-muted">Kein Entwurf</span>';
         if (ub.file_path) {
-            pdfLink = `<a href="/${ub.file_path}" target="_blank" class="btn btn-secondary btn-icon" title="PDF Entwurf öffnen">
+            pdfLink = `<a href="${BASE_PATH}/${ub.file_path}" target="_blank" class="btn btn-secondary btn-icon" title="PDF Entwurf öffnen">
                 <i data-lucide="file-text"></i> PDF
             </a>`;
         }
