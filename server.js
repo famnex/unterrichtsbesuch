@@ -66,7 +66,7 @@ async function authMiddleware(req, res, next) {
             // Signaturprüfung überspringen (Proxy hat das bereits erledigt)
             decoded = jwt.decode(token);
             if (!decoded) {
-                return res.status(401).json({ error: 'Token konnte nicht dekodiert werden' });
+                return res.status(401).json({ error: 'Token konnte nicht als JWT dekodiert werden (falsches Format)' });
             }
         }
 
@@ -130,26 +130,50 @@ router.get('/api/auth/me', authMiddleware, (req, res) => {
 });
 
 // API: Settings abrufen
-router.get('/api/settings', authMiddleware, async (req, res) => {
-    // Nur Admin darf Settings sehen, außer das Setup ist noch nicht abgeschlossen
-    if (req.user.role !== 'admin' && req.settings.is_setup_completed === 1) {
-        return res.status(403).json({ error: 'Keine Berechtigung' });
+router.get('/api/settings', async (req, res, next) => {
+    try {
+        const db = await getDatabase();
+        const settings = await db.get('SELECT is_setup_completed FROM settings WHERE id = 1');
+        if (!settings || settings.is_setup_completed === 0) {
+            // First-run setup: Keine Authentifizierung erforderlich, um leere Settings abzurufen
+            return next();
+        }
+        // Regulärer Schutz nach abgeschlossenem Setup
+        authMiddleware(req, res, next);
+    } catch (err) {
+        res.status(500).json({ error: 'Fehler bei der Setup-Prüfung' });
     }
+}, async (req, res) => {
     const db = await getDatabase();
     const settings = await db.get('SELECT * FROM settings WHERE id = 1');
-    // Passwort nicht im Klartext zurückgeben (Sicherheitsmaßnahme)
     if (settings) {
+        // Passwort nicht im Klartext zurückgeben (Sicherheitsmaßnahme)
         settings.smtp_pass = settings.smtp_pass ? '********' : '';
     }
     res.json(settings);
 });
 
 // API: Settings speichern
-router.post('/api/settings', authMiddleware, async (req, res) => {
-    if (req.user.role !== 'admin' && req.settings.is_setup_completed === 1) {
-        return res.status(403).json({ error: 'Keine Berechtigung' });
+router.post('/api/settings', async (req, res, next) => {
+    try {
+        const db = await getDatabase();
+        const settings = await db.get('SELECT is_setup_completed FROM settings WHERE id = 1');
+        if (!settings || settings.is_setup_completed === 0) {
+            // First-run setup: Keine Authentifizierung erforderlich, um das Setup zu speichern
+            return next();
+        }
+        // Regulärer Schutz nach abgeschlossenem Setup (Nur Admins)
+        authMiddleware(req, res, (err) => {
+            if (err) return next(err);
+            if (req.user.role !== 'admin') {
+                return res.status(403).json({ error: 'Keine Berechtigung' });
+            }
+            next();
+        });
+    } catch (err) {
+        res.status(500).json({ error: 'Fehler bei der Setup-Prüfung' });
     }
-
+}, async (req, res) => {
     const {
         smtp_host,
         smtp_port,

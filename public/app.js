@@ -89,32 +89,27 @@ function showView(viewName) {
 // App Initialisierung
 async function initApp() {
     try {
+        // 1. Zuerst prüfen, ob ein SSO-Token in der URL übergeben wurde (?sso_token=...)
+        const urlParams = new URLSearchParams(window.location.search);
+        const ssoToken = urlParams.get('sso_token');
+        if (ssoToken) {
+            setToken(ssoToken);
+            // URL bereinigen, um das Token aus der Adressleiste zu entfernen
+            const cleanUrl = window.location.pathname;
+            window.history.replaceState({}, document.title, cleanUrl);
+        }
+
+        // 2. Setup-Status prüfen
         const statusData = await apiFetch('/api/setup-status');
         setupCompleted = statusData.is_setup_completed;
         
         if (!setupCompleted) {
-            // First-Run Setup erzwingen
-            // Falls bereits ein Token existiert, versuchen wir uns anzumelden, um als Admin das Setup zu machen
-            const token = getToken();
-            if (token) {
-                try {
-                    const authData = await apiFetch('/api/auth/me');
-                    currentUser = authData.user;
-                    setupCompleted = authData.is_setup_completed;
-                    
-                    if (!setupCompleted) {
-                        showView('setup');
-                        return;
-                    }
-                } catch (e) {
-                    removeToken();
-                }
-            }
-            // Wenn kein Token da ist, zeigen wir den Login an. Der erste Benutzer, der sich einloggt, wird Admin.
-            showView('login');
+            // First-Run Setup: Direkt die Setup-Ansicht anzeigen (kein Token nötig)
+            showView('setup');
             return;
         }
 
+        // 3. Wenn Setup abgeschlossen ist, normales Token-Handling
         const token = getToken();
         if (!token) {
             showView('login');
