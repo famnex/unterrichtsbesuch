@@ -1,4 +1,4 @@
-# Unterrichtsbesuche-Verwaltungs-App
+# Unterrichtsbesuch
 
 Eine moderne Full-Stack-Webanwendung zur komfortablen Verwaltung von Unterrichtsbesuchen (UB) für Lehrkräfte (LiV) und Schulleitungen (SL).
 
@@ -31,7 +31,7 @@ Eine moderne Full-Stack-Webanwendung zur komfortablen Verwaltung von Unterrichts
      ```bash
      npm run dev
      ```
-4. Die App läuft standardmäßig auf [http://localhost:3000](http://localhost:3000).
+4. Die App läuft standardmäßig auf [http://localhost:3022](http://localhost:3022).
 
 ## Systemstart & Ersteinrichtung
 

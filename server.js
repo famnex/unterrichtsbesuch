@@ -7,7 +7,7 @@ const { getDatabase } = require('./db');
 const { sendUBSubmittedMail, sendUBAssignedMails } = require('./mailer');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3022;
 
 // Ordner für Uploads erstellen, falls nicht vorhanden
 const uploadDir = path.join(__dirname, 'uploads');

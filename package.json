@@ -1,5 +1,5 @@
 {
-  "name": "unterrichtsbesuche-app",
+  "name": "unterrichtsbesuch",
   "version": "1.0.0",
   "description": "Verwaltung von Unterrichtsbesuchen mit JWT, SMTP und iCal-Workflow",
   "main": "server.js",
