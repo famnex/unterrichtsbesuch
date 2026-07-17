@@ -336,13 +336,12 @@ function renderTeacherUbs() {
     const filteredUbs = allMyUbs.filter(ub => {
         const ubDate = new Date(ub.date_time);
         const isPast = ubDate < now;
+        const isCancelled = ub.status === 'cancelled';
         
         if (teacherActiveTab === 'active') {
-            // Aktive UBs: Liegen in der Zukunft und sind nicht archiviert/abgesagt (oder abgesagte liegen in der Zukunft)
-            return !isPast && ub.status !== 'archived';
+            return !isPast && ub.status !== 'archived' && !isCancelled;
         } else {
-            // Archivierte UBs: Liegen in der Vergangenheit oder sind archiviert
-            return isPast || ub.status === 'archived';
+            return isPast || ub.status === 'archived' || isCancelled;
         }
     });
 
