@@ -70,13 +70,13 @@ Speichert die geplanten und durchgeführten Unterrichtsbesuche.
 | `room` | TEXT | Klassenzimmer |
 | `subject` | TEXT | Unterrichtsfach |
 | `grade` | TEXT | Klasse / Lerngruppe |
-| `type` | TEXT | Art des Besuchs (z.B. "Unterrichtsbesuch", "Gemeinsamer Besuch") |
+| `type` | TEXT | Art des Besuchs (z.B. "Unterrichtsbesuch", "Examen") |
 | `instructor` | TEXT | Name des zuständigen Fachleiters |
 | `module` | TEXT | Ausbildungsmodul |
 | `file_path` | TEXT | Dateipfad des hochgeladenen Unterrichtsentwurfs (PDF) |
 | `user_id` | TEXT | Fremdschlüssel auf `users.id` (Ersteller des UBs) |
 | `assigned_schulleitung_id` | TEXT | Fremdschlüssel auf `users.id` (Begleitendes Schulleitungsmitglied, optional) |
-| `status` | TEXT | Aktueller Status: `draft` (Entwurf), `submitted` (Eingereicht), `archived` (Archiviert) |
+| `status` | TEXT | Aktueller Status: `draft` (Entwurf), `submitted` (Eingereicht), `cancelled` (Abgesagt), `archived` (Archiviert) |
 | `created_at` | TEXT | Erstellungszeitstempel |
 | `updated_at` | TEXT | Letzter Änderungszeitstempel |
 
@@ -103,4 +103,5 @@ CREATE TABLE IF NOT EXISTS unterrichtsbesuche (
 
 ## Änderungen und Historie
 - **2026-07-17:** Initiale Tabellenstruktur definiert. Feld `jwt_secret` zu `settings` hinzugefügt.
-- **2026-07-17 (Update 2):** Feld `logout_redirect_url` zur Tabelle `settings` hinzugefügt, um eine konfigurierbare Weiterleitung beim Abmelden zu ermöglichen.
+- **2026-07-17 (Update 2):** Feld `logout_redirect_url` zur Tabelle `settings` hinzugefügt.
+- **2026-07-17 (Update 3):** Status `cancelled` (Abgesagt) für Unterrichtsbesuche dokumentiert.

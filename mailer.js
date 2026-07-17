@@ -71,7 +71,8 @@ function generateICS(title, description, location, dateStr) {
 /**
  * Hilfsfunktion zur Generierung eines einheitlichen HTML-E-Mail-Templates.
  */
-function getHtmlTemplate(title, recipientName, contentHtml) {
+function getHtmlTemplate(title, recipientName, contentHtml, isWarning = false) {
+    const headerBg = isWarning ? '#e53e3e' : '#5850ec'; // Rot für Absagen, Blau für Standard
     return `
     <!DOCTYPE html>
     <html>
@@ -80,11 +81,11 @@ function getHtmlTemplate(title, recipientName, contentHtml) {
         <style>
             body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f5f7; color: #2d3748; margin: 0; padding: 0; }
             .container { max-width: 600px; margin: 40px auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); overflow: hidden; }
-            .header { background-color: #5850ec; padding: 24px; text-align: center; color: #ffffff; }
+            .header { background-color: ${headerBg}; padding: 24px; text-align: center; color: #ffffff; }
             .header h1 { margin: 0; font-size: 22px; font-weight: 600; }
             .content { padding: 32px; line-height: 1.6; }
             .content p { margin: 0 0 16px 0; }
-            .details-box { background-color: #f7fafc; border-left: 4px solid #5850ec; border-radius: 4px; padding: 20px; margin: 24px 0; }
+            .details-box { background-color: #f7fafc; border-left: 4px solid ${headerBg}; border-radius: 4px; padding: 20px; margin: 24px 0; }
             .details-row { display: flex; margin-bottom: 8px; font-size: 14px; }
             .details-row:last-child { margin-bottom: 0; }
             .details-label { width: 120px; font-weight: 600; color: #718096; }
@@ -289,7 +290,6 @@ Dein Unterrichtsbesuchs-Portal`;
         };
 
         if (icsContent) {
-            // Dies wandelt die E-Mail in eine native Outlook/Gmail-Kalendereinladung um!
             slMailConfig.icalEvent = {
                 filename: 'unterrichtsbesuch.ics',
                 method: 'request',
@@ -314,7 +314,137 @@ Dein Unterrichtsbesuchs-Portal`;
     }
 }
 
+/**
+ * Sendet E-Mails bei Absage eines Unterrichtsbesuchs.
+ */
+async function sendUBCancelledMails(userEmail, userName, slEmail, slName, ubDetails) {
+    const transportInfo = await getTransporter();
+    
+    const dateFormatted = new Date(ubDetails.date_time).toLocaleString('de-DE', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+    });
+
+    const subjectText = `ABGESAGT: ${ubDetails.type} am ${dateFormatted} - ${userName}`;
+
+    // 1. Mail an den Benutzer (Bestätigung der Absage)
+    const userText = `Hallo ${userName},
+
+dein Unterrichtsbesuch am ${dateFormatted} im Fach ${ubDetails.subject} (Klasse ${ubDetails.grade}) wurde erfolgreich abgesagt.
+
+Details zum abgesagten Termin:
+- Raum: ${ubDetails.room}
+- Art: ${ubDetails.type}
+
+Freundliche Grüße,
+Dein Unterrichtsbesuchs-Portal`;
+
+    const userHtmlContent = `
+        <p>dein Unterrichtsbesuch wurde erfolgreich im System abgesagt.</p>
+        <div class="details-box" style="border-left-color: #e53e3e;">
+            <div class="details-row"><div class="details-label">Termin:</div><div class="details-value">${dateFormatted} Uhr</div></div>
+            <div class="details-row"><div class="details-label">Fach:</div><div class="details-value">${ubDetails.subject}</div></div>
+            <div class="details-row"><div class="details-label">Klasse:</div><div class="details-value">${ubDetails.grade}</div></div>
+            <div class="details-row"><div class="details-label">Art:</div><div class="details-value">${ubDetails.type}</div></div>
+        </div>
+        <p>Freundliche Grüße,<br>Dein Unterrichtsbesuchs-Portal</p>
+    `;
+
+    const userHtml = getHtmlTemplate('Unterrichtsbesuch abgesagt', userName, userHtmlContent, true);
+
+    // 2. Mail an Schulleitung (falls zugeordnet)
+    let slText = '';
+    let slHtml = '';
+    if (slEmail && slName) {
+        slText = `Hallo ${slName},
+
+der folgende Unterrichtsbesuch, den du begleiten solltest, wurde von der Lehrkraft abgesagt:
+
+Lehrkraft: ${userName}
+Datum/Uhrzeit: ${dateFormatted}
+Fach: ${ubDetails.subject}
+Klasse: ${ubDetails.grade}
+Art: ${ubDetails.type}
+
+Der Termin wurde in deinem Kalender-Workflow storniert.
+
+Freundliche Grüße,
+Dein Unterrichtsbesuchs-Portal`;
+
+        const slHtmlContent = `
+            <p>der folgende Termin, für den du als Begleitung eingetragen warst, wurde von der Lehrkraft abgesagt:</p>
+            <div class="details-box" style="border-left-color: #e53e3e;">
+                <div class="details-row"><div class="details-label">Lehrkraft:</div><div class="details-value">${userName}</div></div>
+                <div class="details-row"><div class="details-label">Termin:</div><div class="details-value">${dateFormatted} Uhr</div></div>
+                <div class="details-row"><div class="details-label">Fach:</div><div class="details-value">${ubDetails.subject}</div></div>
+                <div class="details-row"><div class="details-label">Klasse:</div><div class="details-value">${ubDetails.grade}</div></div>
+                <div class="details-row"><div class="details-label">Art:</div><div class="details-value">${ubDetails.type}</div></div>
+            </div>
+            <p>Der Termin ist für Sie storniert.</p>
+            <p>Freundliche Grüße,<br>Dein Unterrichtsbesuchs-Portal</p>
+        `;
+
+        slHtml = getHtmlTemplate('HINWEIS: Begleitung abgesagt', slName, slHtmlContent, true);
+    }
+
+    if (!transportInfo) {
+        console.log(`[SIMULATION MAIL] Absage an Benutzer: ${userEmail}\nBetreff: ${subjectText}\n---`);
+        if (slEmail) {
+            console.log(`[SIMULATION MAIL] Absage an Schulleitung: ${slEmail}\nBetreff: ${subjectText}\n---`);
+        }
+        return;
+    }
+
+    try {
+        // Mail an Benutzer senden
+        await transportInfo.transporter.sendMail({
+            from: transportInfo.from,
+            to: userEmail,
+            subject: `Bestätigung: Unterrichtsbesuch abgesagt am ${dateFormatted}`,
+            text: userText,
+            html: userHtml
+        });
+        console.log(`Absage-E-Mail erfolgreich an Benutzer (${userEmail}) gesendet.`);
+
+        // Mail an Schulleitung senden, falls zugeordnet
+        if (slEmail && slName) {
+            const mailConfig = {
+                from: transportInfo.from,
+                to: slEmail,
+                subject: `ABGESAGT: Begleitung Unterrichtsbesuch ${userName}`,
+                text: slText,
+                html: slHtml
+            };
+            
+            // Optional: Ein Stornierungs-iCal-Event (Method: CANCEL) anhängen
+            try {
+                const title = `ABGESAGT: ${ubDetails.type}: ${ubDetails.subject} - ${userName}`;
+                const description = `Dieser Termin wurde abgesagt.`;
+                const location = `Raum ${ubDetails.room}`;
+                const icsCancelContent = await generateICS(title, description, location, ubDetails.date_time);
+                
+                // Setze die Methode auf CANCEL
+                const cancelIcs = icsCancelContent.replace('METHOD:REQUEST', 'METHOD:CANCEL').replace('STATUS:CONFIRMED', 'STATUS:CANCELLED');
+                
+                mailConfig.icalEvent = {
+                    filename: 'stornierung.ics',
+                    method: 'cancel',
+                    content: cancelIcs
+                };
+            } catch (icsErr) {
+                console.error('Fehler bei Stornierungs-ICS-Generierung:', icsErr);
+            }
+
+            await transportInfo.transporter.sendMail(mailConfig);
+            console.log(`Absage-E-Mail erfolgreich an Schulleitung (${slEmail}) gesendet.`);
+        }
+    } catch (err) {
+        console.error('Fehler beim Senden der Absage-E-Mails:', err);
+    }
+}
+
 module.exports = {
     sendUBSubmittedMail,
-    sendUBAssignedMails
+    sendUBAssignedMails,
+    sendUBCancelledMails
 };

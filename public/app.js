@@ -338,8 +338,10 @@ function renderTeacherUbs() {
         const isPast = ubDate < now;
         
         if (teacherActiveTab === 'active') {
+            // Aktive UBs: Liegen in der Zukunft und sind nicht archiviert/abgesagt (oder abgesagte liegen in der Zukunft)
             return !isPast && ub.status !== 'archived';
         } else {
+            // Archivierte UBs: Liegen in der Vergangenheit oder sind archiviert
             return isPast || ub.status === 'archived';
         }
     });
@@ -371,6 +373,9 @@ function renderTeacherUbs() {
         if (ub.status === 'submitted') {
             statusText = 'Eingereicht';
             statusClass = 'status-submitted';
+        } else if (ub.status === 'cancelled') {
+            statusText = 'Abgesagt';
+            statusClass = 'status-cancelled';
         } else if (ub.status === 'archived') {
             statusText = 'Archiviert';
             statusClass = 'status-archived';
@@ -378,6 +383,7 @@ function renderTeacherUbs() {
 
         const isPast = ubDate < now;
         const isEditable = ub.status === 'draft' && !isPast;
+        const isCancellable = ub.status === 'submitted' && !isPast;
 
         let actionButtons = '';
         if (isEditable) {
@@ -390,9 +396,18 @@ function renderTeacherUbs() {
                 </button>
             `;
         }
+
+        // Absagen-Button für eingereichte UBs
+        if (isCancellable) {
+            actionButtons += `
+                <button class="btn btn-danger" onclick="cancelUb(${ub.id})">
+                    <i data-lucide="x-circle"></i> Absagen
+                </button>
+            `;
+        }
         
-        // PDF-Upload ist immer möglich, solange nicht archiviert oder vergangen, auch nach Einreichung.
-        if (ub.status !== 'archived' && !isPast) {
+        // PDF-Upload ist immer möglich, solange nicht archiviert, abgesagt oder vergangen.
+        if (ub.status !== 'archived' && ub.status !== 'cancelled' && !isPast) {
             actionButtons += `
                 <button class="btn btn-secondary btn-icon" onclick="openUploadModal(${ub.id})" title="Entwurf hochladen (PDF)">
                     <i data-lucide="upload-cloud"></i> ${ub.file_path ? 'Entwurf ersetzen' : 'PDF hochladen'}
@@ -411,7 +426,7 @@ function renderTeacherUbs() {
                 </div>
             </div>
             <div>
-                <h3>${ub.subject} (${ub.grade})</h3>
+                <h3 style="${ub.status === 'cancelled' ? 'text-decoration: line-through; color: var(--text-muted);' : ''}">${ub.subject} (${ub.grade})</h3>
                 <p class="subtitle" style="margin-bottom: 12px;">${ub.type}</p>
                 
                 <div style="display: flex; flex-direction: column; gap: 8px;">
@@ -431,7 +446,7 @@ function renderTeacherUbs() {
                     </div>` : ''}
                     <div class="ub-meta-item">
                         <i data-lucide="shield-check"></i>
-                        <span>Begleitung: ${ub.assigned_sl_name || 'Noch ausstehend'}</span>
+                        <span>Begleitung: ${ub.assigned_sl_name || (ub.status === 'cancelled' ? 'Abgesagt' : 'Noch ausstehend')}</span>
                     </div>
                     ${ub.file_path ? `
                     <div class="ub-meta-item">
@@ -554,8 +569,6 @@ document.getElementById('ub-form').addEventListener('submit', async (e) => {
         ubModal.classList.add('hidden');
         
         // Nach dem Speichern fragen, ob gleich eingereicht werden soll
-        // Nur fragen, wenn der Unterrichtsbesuch noch im Entwurf (draft) ist.
-        // Das geschieht nun über unser eigenes schönes Modal, um echte "Ja / Nein" Knöpfe zu ermöglichen!
         if (savedUb && savedUb.status === 'draft') {
             pendingSubmitUbId = savedUb.id;
             document.getElementById('confirm-submit-modal').classList.remove('hidden');
@@ -566,6 +579,21 @@ document.getElementById('ub-form').addEventListener('submit', async (e) => {
         alert('Fehler beim Speichern: ' + err.message);
     }
 });
+
+// Absagen durch Lehrkraft
+async function cancelUb(id) {
+    if (!confirm('Möchten Sie diesen Unterrichtsbesuch wirklich absagen?\nDies storniert den Termin und benachrichtigt Sie sowie das zugeordnete Schulleitungsmitglied per E-Mail.')) return;
+    try {
+        await apiFetch(`/api/unterrichtsbesuche/${id}`, {
+            method: 'PUT',
+            body: { status: 'cancelled' }
+        });
+        alert('Der Unterrichtsbesuch wurde erfolgreich abgesagt.');
+        loadTeacherDashboard();
+    } catch (err) {
+        alert('Fehler beim Absagen: ' + err.message);
+    }
+}
 
 // ----------------------------------------------------
 // CUSTOM CONFIRM (JA/NEIN) MODAL EVENTS
@@ -597,7 +625,6 @@ document.getElementById('btn-confirm-yes').addEventListener('click', async () =>
 });
 
 async function submitUb(id) {
-    // Wenn man manuell auf der Karte auf "Einreichen" klickt, können wir denselben schönen Dialog nutzen!
     pendingSubmitUbId = id;
     confirmModal.classList.remove('hidden');
 }
@@ -677,15 +704,26 @@ function renderSLDashboard() {
     const tbody = document.getElementById('sl-table-body');
     tbody.innerHTML = '';
 
-    // Wir filtern UBs heraus, die noch im Entwurfsstatus (draft) sind. Die Schulleitung sieht nur eingereichte (submitted) und archivierte.
-    const visibleUbs = allSchoolUbs.filter(ub => ub.status !== 'draft');
+    const now = new Date();
+
+    // UBs filtern: 
+    // - Keine Entwürfe (draft)
+    // - Abgesagte UBs (cancelled) NUR anzeigen, wenn der Termin noch in der Zukunft liegt!
+    const visibleUbs = allSchoolUbs.filter(ub => {
+        if (ub.status === 'draft') return false;
+        if (ub.status === 'cancelled') {
+            const ubDate = new Date(ub.date_time);
+            return ubDate >= now;
+        }
+        return true;
+    });
 
     if (visibleUbs.length === 0) {
         tbody.innerHTML = `
             <tr>
                 <td colspan="9" style="text-align: center; color: var(--text-secondary); padding: 40px;">
                     <i data-lucide="inbox" style="width: 48px; height: 48px; margin-bottom: 12px; display: inline-block;"></i>
-                    <p>Momentan liegen keine eingereichten Unterrichtsbesuche vor.</p>
+                    <p>Momentan liegen keine aktiven Unterrichtsbesuche vor.</p>
                 </td>
             </tr>
         `;
@@ -695,6 +733,10 @@ function renderSLDashboard() {
 
     visibleUbs.forEach(ub => {
         const tr = document.createElement('tr');
+        
+        if (ub.status === 'cancelled') {
+            tr.className = 'cancelled-row';
+        }
         
         const dateFormatted = new Date(ub.date_time).toLocaleString('de-DE', {
             day: '2-digit', month: '2-digit', year: 'numeric',
@@ -709,25 +751,44 @@ function renderSLDashboard() {
             </a>`;
         }
 
-        // Begleitungs-Dropdown
-        let slDropdown = `<select onchange="assignSL(${ub.id}, this.value)" style="width: 100%;">
-            <option value="">-- Nicht zugeordnet --</option>`;
-        
-        slMembers.forEach(sl => {
-            const selected = ub.assigned_schulleitung_id === sl.id ? 'selected' : '';
-            slDropdown += `<option value="${sl.id}" ${selected}>${sl.display_name}</option>`;
-        });
-        slDropdown += `</select>`;
+        // Begleitungs-Auswahl (nur wenn nicht abgesagt)
+        let slDropdown = '';
+        if (ub.status === 'cancelled') {
+            slDropdown = `<span class="badge status-cancelled">Abgesagt</span>`;
+        } else {
+            slDropdown = `<select onchange="assignSL(${ub.id}, this.value)" style="width: 100%;">
+                <option value="">-- Nicht zugeordnet --</option>`;
+            
+            slMembers.forEach(sl => {
+                const selected = ub.assigned_schulleitung_id === sl.id ? 'selected' : '';
+                slDropdown += `<option value="${sl.id}" ${selected}>${sl.display_name}</option>`;
+            });
+            slDropdown += `</select>`;
+        }
 
-        // Selbst übernehmen Button
-        const isAssignedToMe = ub.assigned_schulleitung_id === currentUser.id;
-        const takeButton = isAssignedToMe ? 
-            `<button class="btn btn-secondary btn-icon" title="Zuordnung aufheben" onclick="assignSL(${ub.id}, '')">
-                <i data-lucide="user-minus"></i> Freigeben
-             </button>` :
-            `<button class="btn btn-primary" onclick="assignSL(${ub.id}, '${currentUser.id}')">
-                <i data-lucide="user-plus"></i> Übernehmen
-             </button>`;
+        // Aktionen-Spalte
+        let actionsHtml = '';
+        if (ub.status === 'cancelled') {
+            actionsHtml = `<span style="color: var(--danger); font-weight: 600;">Storniert</span>`;
+        } else {
+            const isAssignedToMe = ub.assigned_schulleitung_id === currentUser.id;
+            actionsHtml = isAssignedToMe ? 
+                `<button class="btn btn-secondary btn-icon" title="Zuordnung aufheben" onclick="assignSL(${ub.id}, '')">
+                    <i data-lucide="user-minus"></i> Freigeben
+                 </button>` :
+                `<button class="btn btn-primary" onclick="assignSL(${ub.id}, '${currentUser.id}')">
+                    <i data-lucide="user-plus"></i> Übernehmen
+                 </button>`;
+        }
+
+        // Falls Admin angemeldet ist, kriegt er zusätzlich einen roten Löschen-Button!
+        if (currentUser.role === 'admin') {
+            actionsHtml += `
+                <button class="btn btn-danger btn-icon" style="margin-left: 8px;" onclick="deleteUb(${ub.id})" title="Dauerhaft löschen (lautlos)">
+                    <i data-lucide="trash-2"></i>
+                </button>
+            `;
+        }
 
         tr.innerHTML = `
             <td><strong>${ub.user_name || 'Unbekannt'}</strong><br><small>${ub.user_email || ''}</small></td>
@@ -738,7 +799,7 @@ function renderSLDashboard() {
             <td>${ub.instructor || 'n.a.'}<br><small>${ub.module || ''}</small></td>
             <td>${pdfLink}</td>
             <td>${slDropdown}</td>
-            <td>${takeButton}</td>
+            <td><div style="display: flex; align-items: center;">${actionsHtml}</div></td>
         `;
 
         tbody.appendChild(tr);
@@ -756,6 +817,39 @@ async function assignSL(ubId, slId) {
         loadSLDashboard();
     } catch (err) {
         alert('Fehler bei der Zuweisung: ' + err.message);
+    }
+}
+
+// Dauerhaftes Löschen durch den Admin
+async function deleteUb(id) {
+    if (!confirm(
+        "!!! ACHTUNG - ADMINISTRATOR-LÖSCHUNG !!!\n\n" +
+        "Möchten Sie diesen Unterrichtsbesuch wirklich dauerhaft aus der Datenbank löschen?\n\n" +
+        "Diese Aktion:\n" +
+        "- Entfernt den Eintrag unwiderruflich aus der Datenbank\n" +
+        "- Löscht eventuell hochgeladene PDF-Entwürfe vom Server\n" +
+        "- Versendet KEINE E-Mail-Benachrichtigung an Lehrer oder Schulleitung!\n\n" +
+        "Möchten Sie fortfahren?"
+    )) return;
+
+    try {
+        const token = getToken();
+        const res = await fetch(`${BASE_PATH}/api/unterrichtsbesuche/${id}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        const data = await res.json();
+        
+        if (!res.ok) {
+            throw new Error(data.error || 'Fehler beim Löschen');
+        }
+
+        alert('Eintrag dauerhaft gelöscht.');
+        loadSLDashboard();
+    } catch (err) {
+        alert('Löschen fehlgeschlagen: ' + err.message);
     }
 }
 
@@ -939,8 +1033,10 @@ async function runSystemUpdate() {
 // Global registrieren für inline Event Handler
 window.openEditUbModal = openEditUbModal;
 window.submitUb = submitUb;
+window.cancelUb = cancelUb;
 window.openUploadModal = openUploadModal;
 window.assignSL = assignSL;
+window.deleteUb = deleteUb;
 window.changeUserRole = changeUserRole;
 
 // Start und Events

@@ -416,6 +416,30 @@ textarea {
     border: 1px solid var(--border-card);
 }
 
+.status-cancelled {
+    background: var(--danger-bg);
+    color: var(--danger);
+    border: 1px solid hsla(350, 80%, 60%, 0.3);
+}
+
+.cancelled-row {
+    opacity: 0.65;
+    background: hsla(350, 80%, 60%, 0.03) !important;
+}
+
+.cancelled-row td {
+    border-bottom-color: hsla(350, 80%, 60%, 0.15) !important;
+}
+
+.cancelled-row strong, .cancelled-row td {
+    text-decoration: line-through;
+    color: var(--text-muted) !important;
+}
+
+.cancelled-row select, .cancelled-row button, .cancelled-row a {
+    text-decoration: none !important;
+}
+
 .ub-card h3 {
     font-size: 1.35rem;
     font-weight: 600;

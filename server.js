@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const { getDatabase } = require('./db');
-const { sendUBSubmittedMail, sendUBAssignedMails } = require('./mailer');
+const { sendUBSubmittedMail, sendUBAssignedMails, sendUBCancelledMails } = require('./mailer');
 
 const app = express();
 const PORT = process.env.PORT || 3022;
@@ -300,8 +300,7 @@ router.get('/api/unterrichtsbesuche', authMiddleware, async (req, res) => {
     let params = [];
 
     if (req.user.role === 'schulleitung' || req.user.role === 'admin') {
-        // Schulleitung und Admin sehen alle Unterrichtsbesuche
-        // Join mit users, um den Namen der Lehrkraft anzuzeigen
+        // Schulleitung und Admin sehen alle Unterrichtsbesuche (auch die abgesagten)
         query = `
             SELECT ub.*, u.display_name as user_name, u.email as user_email, sl.display_name as assigned_sl_name
             FROM unterrichtsbesuche ub
@@ -359,7 +358,7 @@ router.post('/api/unterrichtsbesuche', authMiddleware, async (req, res) => {
     res.status(201).json(newUb);
 });
 
-// API: Unterrichtsbesuch aktualisieren (Eintragen, Ändern oder Zuordnung)
+// API: Unterrichtsbesuch aktualisieren (Eintragen, Ändern, Zuordnung oder Absage)
 router.put('/api/unterrichtsbesuche/:id', authMiddleware, async (req, res) => {
     const db = await getDatabase();
     const ub = await db.get('SELECT * FROM unterrichtsbesuche WHERE id = ?', [req.params.id]);
@@ -368,10 +367,51 @@ router.put('/api/unterrichtsbesuche/:id', authMiddleware, async (req, res) => {
         return res.status(404).json({ error: 'Unterrichtsbesuch nicht gefunden' });
     }
 
-    // Fall 1: Schulleitung/Admin ordnet zu
+    // Fall 1: Absagen durch die Lehrkraft (Status wird auf cancelled gesetzt)
+    if (req.body.status === 'cancelled') {
+        if (ub.user_id !== req.user.id) {
+            return res.status(403).json({ error: 'Keine Berechtigung zur Absage dieses Unterrichtsbesuchs.' });
+        }
+
+        const isPast = new Date(ub.date_time) < new Date();
+        if (isPast) {
+            return res.status(400).json({ error: 'Vergangene Unterrichtsbesuche können nicht mehr abgesagt werden.' });
+        }
+
+        // Status auf cancelled ändern
+        await db.run(
+            'UPDATE unterrichtsbesuche SET status = "cancelled", updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [req.params.id]
+        );
+
+        const updatedUb = await db.get('SELECT * FROM unterrichtsbesuche WHERE id = ?', [req.params.id]);
+
+        // E-Mails an Benutzer und Begleitung (falls zugeordnet) senden
+        const teacher = await db.get('SELECT display_name, email FROM users WHERE id = ?', [ub.user_id]);
+        let slUser = null;
+        if (ub.assigned_schulleitung_id) {
+            slUser = await db.get('SELECT display_name, email FROM users WHERE id = ?', [ub.assigned_schulleitung_id]);
+        }
+
+        sendUBCancelledMails(
+            teacher.email, 
+            teacher.display_name, 
+            slUser ? slUser.email : null, 
+            slUser ? slUser.display_name : null, 
+            updatedUb
+        );
+
+        return res.json(updatedUb);
+    }
+
+    // Fall 2: Schulleitung/Admin ordnet zu
     if (req.body.hasOwnProperty('assigned_schulleitung_id')) {
         if (req.user.role !== 'schulleitung' && req.user.role !== 'admin') {
             return res.status(403).json({ error: 'Nur Schulleitung darf Begleitungen zuweisen.' });
+        }
+
+        if (ub.status === 'cancelled') {
+            return res.status(400).json({ error: 'Abgesagte Unterrichtsbesuche können nicht mehr zugewiesen werden.' });
         }
 
         const { assigned_schulleitung_id } = req.body;
@@ -397,15 +437,15 @@ router.put('/api/unterrichtsbesuche/:id', authMiddleware, async (req, res) => {
         return res.json(updatedUb);
     }
 
-    // Fall 2: Lehrkraft editiert eigenen Unterrichtsbesuch
+    // Fall 3: Lehrkraft editiert eigenen Unterrichtsbesuch
     if (ub.user_id !== req.user.id) {
         return res.status(403).json({ error: 'Keine Berechtigung zur Bearbeitung dieses Eintrags' });
     }
 
     // Archivierte oder vergangene Termine dürfen nicht mehr bearbeitet werden (schreibgeschützt)
     const isPast = new Date(ub.date_time) < new Date();
-    if (ub.status === 'archived' || isPast) {
-        return res.status(400).json({ error: 'Vergangene oder archivierte Unterrichtsbesuche können nicht geändert werden.' });
+    if (ub.status === 'archived' || ub.status === 'cancelled' || isPast) {
+        return res.status(400).json({ error: 'Vergangene, archivierte oder abgesagte Unterrichtsbesuche können nicht geändert werden.' });
     }
 
     const { date_time, room, subject, grade, type, instructor, module, status } = req.body;
@@ -445,6 +485,36 @@ router.put('/api/unterrichtsbesuche/:id', authMiddleware, async (req, res) => {
     }
 
     res.json(updatedUb);
+});
+
+// API: Unterrichtsbesuch dauerhaft löschen (nur Admin)
+router.delete('/api/unterrichtsbesuche/:id', authMiddleware, async (req, res) => {
+    if (req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Keine Berechtigung. Nur Administratoren dürfen Einträge löschen.' });
+    }
+
+    const db = await getDatabase();
+    const ub = await db.get('SELECT * FROM unterrichtsbesuche WHERE id = ?', [req.params.id]);
+
+    if (!ub) {
+        return res.status(404).json({ error: 'Eintrag nicht gefunden.' });
+    }
+
+    // PDF-Datei vom Server löschen, falls vorhanden
+    if (ub.file_path) {
+        const filePath = path.join(__dirname, ub.file_path);
+        if (fs.existsSync(filePath)) {
+            try {
+                fs.unlinkSync(filePath);
+                console.log(`PDF-Datei gelöscht: ${filePath}`);
+            } catch (err) {
+                console.error('Fehler beim Löschen der PDF-Datei:', err);
+            }
+        }
+    }
+
+    await db.run('DELETE FROM unterrichtsbesuche WHERE id = ?', [req.params.id]);
+    res.json({ message: 'Unterrichtsbesuch dauerhaft gelöscht.' });
 });
 
 // API: Entwurf PDF-Upload
