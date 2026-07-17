@@ -2,6 +2,7 @@
 let currentUser = null;
 let setupCompleted = false;
 let globalLogoutUrl = ''; // Wird beim App-Start aus dem Setup-Status geladen
+let pendingSubmitUbId = null; // Speichert die ID des UBs, das auf Bestätigung zur Einreichung wartet
 
 const BASE_PATH = '/unterrichtsbesuch';
 
@@ -552,42 +553,53 @@ document.getElementById('ub-form').addEventListener('submit', async (e) => {
 
         ubModal.classList.add('hidden');
         
-        // NEU: Nach dem Speichern fragen, ob gleich eingereicht werden soll
-        // Nur fragen, wenn der Unterrichtsbesuch noch im Entwurf (draft) ist
+        // Nach dem Speichern fragen, ob gleich eingereicht werden soll
+        // Nur fragen, wenn der Unterrichtsbesuch noch im Entwurf (draft) ist.
+        // Das geschieht nun über unser eigenes schönes Modal, um echte "Ja / Nein" Knöpfe zu ermöglichen!
         if (savedUb && savedUb.status === 'draft') {
-            const confirmSubmit = confirm(
-                "Möchten Sie diesen Unterrichtsbesuch jetzt direkt einreichen?\n\n" +
-                "Hinweis:\n" +
-                "Nach dem Einreichen können die Formulardaten nicht mehr geändert werden.\n" +
-                "Der Unterrichtsentwurf (PDF) kann jedoch auch im Nachhinein jederzeit hochgeladen oder durch eine neuere Version ersetzt werden."
-            );
-            
-            if (confirmSubmit) {
-                await apiFetch(`/api/unterrichtsbesuche/${savedUb.id}`, {
-                    method: 'PUT',
-                    body: { status: 'submitted' }
-                });
-                alert('Unterrichtsbesuch erfolgreich eingereicht!');
-            }
+            pendingSubmitUbId = savedUb.id;
+            document.getElementById('confirm-submit-modal').classList.remove('hidden');
+        } else {
+            loadTeacherDashboard();
         }
-
-        loadTeacherDashboard();
     } catch (err) {
         alert('Fehler beim Speichern: ' + err.message);
     }
 });
 
-async function submitUb(id) {
-    if (!confirm('Möchten Sie diesen Unterrichtsbesuch einreichen? Änderungen an den Formulardaten sind danach nicht mehr möglich.')) return;
+// ----------------------------------------------------
+// CUSTOM CONFIRM (JA/NEIN) MODAL EVENTS
+// ----------------------------------------------------
+const confirmModal = document.getElementById('confirm-submit-modal');
+
+function closeConfirmModal() {
+    confirmModal.classList.add('hidden');
+    pendingSubmitUbId = null;
+    loadTeacherDashboard();
+}
+
+document.getElementById('btn-close-confirm-modal').addEventListener('click', closeConfirmModal);
+document.getElementById('btn-confirm-no').addEventListener('click', closeConfirmModal);
+
+document.getElementById('btn-confirm-yes').addEventListener('click', async () => {
+    if (!pendingSubmitUbId) return;
     try {
-        await apiFetch(`/api/unterrichtsbesuche/${id}`, {
+        await apiFetch(`/api/unterrichtsbesuche/${pendingSubmitUbId}`, {
             method: 'PUT',
             body: { status: 'submitted' }
         });
-        loadTeacherDashboard();
+        alert('Unterrichtsbesuch erfolgreich eingereicht!');
+        closeConfirmModal();
     } catch (err) {
         alert('Fehler beim Einreichen: ' + err.message);
+        closeConfirmModal();
     }
+});
+
+async function submitUb(id) {
+    // Wenn man manuell auf der Karte auf "Einreichen" klickt, können wir denselben schönen Dialog nutzen!
+    pendingSubmitUbId = id;
+    confirmModal.classList.remove('hidden');
 }
 
 // ----------------------------------------------------

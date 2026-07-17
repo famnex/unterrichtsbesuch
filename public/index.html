@@ -331,6 +331,28 @@
         </div>
     </div>
 
+    <!-- MODAL: Einreichungs-Bestätigung (Ja/Nein) -->
+    <div id="confirm-submit-modal" class="modal hidden">
+        <div class="modal-content glass-card" style="max-width: 550px;">
+            <div class="modal-header">
+                <h2>Unterrichtsbesuch einreichen?</h2>
+                <button class="btn-close" id="btn-close-confirm-modal">&times;</button>
+            </div>
+            <div style="margin-bottom: 20px; font-size: 1.05rem;">
+                <p>Möchten Sie diesen Unterrichtsbesuch jetzt direkt einreichen?</p>
+                <div style="margin-top: 16px; padding: 16px; background: hsla(250, 84%, 67%, 0.1); border-left: 4px solid var(--primary); border-radius: 6px; font-size: 0.95rem; line-height: 1.5;">
+                    <strong style="color: var(--primary); display: block; margin-bottom: 6px;">💡 Wichtiger Hinweis:</strong>
+                    Nach dem Einreichen können die Formulardaten nicht mehr geändert werden.
+                    Der Unterrichtsentwurf (PDF) kann jedoch auch im Nachhinein jederzeit hochgeladen oder durch eine neuere Version ersetzt werden.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" id="btn-confirm-no">Nein, als Entwurf belassen</button>
+                <button type="button" class="btn btn-primary" id="btn-confirm-yes">Ja, jetzt einreichen</button>
+            </div>
+        </div>
+    </div>
+
     <!-- MODAL: PDF Upload -->
     <div id="upload-modal" class="modal hidden">
         <div class="modal-content glass-card">
