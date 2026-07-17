@@ -67,7 +67,9 @@ function generateICS(title, description, location, dateStr, organizer) {
             method: 'REQUEST' // Macht die ICS zur interaktiven Kalendereinladung (für Outlook/Gmail)
         };
 
-        // WICHTIG: Für Outlook/Exchange ist bei einer REQUEST-Methode ein Organisator Pflicht
+        // WICHTIG: Für Outlook/Exchange ist bei einer REQUEST-Methode ein Organisator Pflicht.
+        // Um Office 365 Spoofing-Blockaden zu verhindern, MUSS die E-Mail-Adresse des Organizers
+        // exakt mit der SMTP-Absenderadresse (from) übereinstimmen!
         if (organizer && organizer.name && organizer.email && organizer.email.trim()) {
             event.organizer = {
                 name: organizer.name,
@@ -75,7 +77,7 @@ function generateICS(title, description, location, dateStr, organizer) {
             };
             console.log(`[MAIL-DEBUG] ICS Event-Organizer gesetzt: ${organizer.name} <${organizer.email.trim()}>`);
         } else {
-            console.log('[MAIL-DEBUG] ICS Event-Organizer nicht gesetzt (keine E-Mail-Adresse für Lehrkraft vorhanden).');
+            console.log('[MAIL-DEBUG] ICS Event-Organizer nicht gesetzt.');
         }
 
         ics.createEvent(event, (error, value) => {
@@ -210,6 +212,11 @@ async function sendUBAssignedMails(userEmail, userName, slEmail, slName, ubDetai
     - UB-ID: ${ubDetails.id}, Fach: ${ubDetails.subject}`);
 
     const transportInfo = await getTransporter();
+    if (!transportInfo) {
+        console.log(`[SIMULATION MAIL] An SL: ${slEmail}\nBetreff: Begleitung Unterrichtsbesuch\n---`);
+        console.log(`[SIMULATION MAIL] An Benutzer: ${userEmail}\nBetreff: Begleitung für deinen Unterrichtsbesuch\n---`);
+        return;
+    }
     
     const dateFormatted = new Date(ubDetails.date_time).toLocaleString('de-DE', {
         day: '2-digit', month: '2-digit', year: 'numeric',
@@ -223,7 +230,12 @@ async function sendUBAssignedMails(userEmail, userName, slEmail, slName, ubDetai
         const description = `${ubDetails.type} von ${userName} im Fach ${ubDetails.subject} (Klasse ${ubDetails.grade}).\nFachleiter: ${ubDetails.instructor || 'n.a.'}\nModul: ${ubDetails.module || 'n.a.'}`;
         const location = `Raum ${ubDetails.room}`;
         
-        const organizer = (userEmail && userEmail.trim()) ? { name: userName, email: userEmail } : null;
+        // WICHTIG: Die E-Mail des Organizers MUSS der SMTP-Senderadresse (transportInfo.from) entsprechen!
+        // Sonst stuft Office 365 (Exchange) dies als Spoofing ein und verwirft die Mail stumm.
+        const organizer = { 
+            name: userName, // Lehrkraft Name als Anzeigename
+            email: transportInfo.from // Portal-Absender als E-Mail-Adresse
+        };
         icsContent = await generateICS(title, description, location, ubDetails.date_time, organizer);
     } catch (err) {
         console.error('[MAIL-ERROR] Fehler beim Generieren der ICS-Datei:', err);
@@ -294,12 +306,6 @@ Dein Unterrichtsbesuchs-Portal`;
 
     const userHtml = getHtmlTemplate('Begleitung für Unterrichtsbesuch', userName, userHtmlContent);
 
-    if (!transportInfo) {
-        console.log(`[SIMULATION MAIL] An SL: ${slEmail}\nBetreff: ${slSubject}\nMit interaktivem Kalender-Event (ics): ${!!icsContent}\n---`);
-        console.log(`[SIMULATION MAIL] An Benutzer: ${userEmail}\nBetreff: ${userSubject}\nHTML-Länge: ${userHtml.length}\n---`);
-        return;
-    }
-
     // SICHERHEITSPRÜFUNGEN VOR VERSAND
     if (slEmail && slEmail.trim()) {
         try {
@@ -358,6 +364,13 @@ async function sendUBCancelledMails(userEmail, userName, slEmail, slName, ubDeta
     - UB-ID: ${ubDetails.id}, Fach: ${ubDetails.subject}`);
 
     const transportInfo = await getTransporter();
+    if (!transportInfo) {
+        console.log(`[SIMULATION MAIL] Absage an Benutzer: ${userEmail}\n---`);
+        if (slEmail) {
+            console.log(`[SIMULATION MAIL] Absage an Schulleitung: ${slEmail}\n---`);
+        }
+        return;
+    }
     
     const dateFormatted = new Date(ubDetails.date_time).toLocaleString('de-DE', {
         day: '2-digit', month: '2-digit', year: 'numeric',
@@ -432,20 +445,16 @@ Dein Unterrichtsbesuchs-Portal`;
             const description = `Dieser Termin wurde abgesagt.`;
             const location = `Raum ${ubDetails.room}`;
             
-            const organizer = (userEmail && userEmail.trim()) ? { name: userName, email: userEmail } : null;
+            // WICHTIG: Die E-Mail des Organizers MUSS der SMTP-Senderadresse (transportInfo.from) entsprechen!
+            const organizer = { 
+                name: userName, 
+                email: transportInfo.from 
+            };
             const icsCancelContent = await generateICS(title, description, location, ubDetails.date_time, organizer);
             cancelIcs = icsCancelContent.replace('METHOD:REQUEST', 'METHOD:CANCEL').replace('STATUS:CONFIRMED', 'STATUS:CANCELLED');
         } catch (icsErr) {
             console.error('[MAIL-ERROR] Fehler bei Stornierungs-ICS-Generierung:', icsErr);
         }
-    }
-
-    if (!transportInfo) {
-        console.log(`[SIMULATION MAIL] Absage an Benutzer: ${userEmail}\nBetreff: ${subjectText}\n---`);
-        if (slEmail) {
-            console.log(`[SIMULATION MAIL] Absage an Schulleitung: ${slEmail}\nBetreff: ${subjectText}\n---`);
-        }
-        return;
     }
 
     // SICHERHEITSPRÜFUNGEN VOR VERSAND
