@@ -20,6 +20,7 @@ Speichert die globalen Anwendungskonfigurationen und SMTP-Einstellungen.
 | `jwt_claim_name` | TEXT | Claim-Name im JWT für den Klarnamen (z.B. `name` oder `displayName`) |
 | `jwt_claim_email` | TEXT | Claim-Name im JWT für die E-Mail-Adresse (z.B. `email`) |
 | `is_setup_completed` | INTEGER | Flag, ob das First-Run-Setup abgeschlossen ist (`0` = Nein, `1` = Ja) |
+| `logout_redirect_url` | TEXT | Weiterleitungs-URL nach dem Abmelden (z. B. SSO-Logout des Identity Providers) |
 
 ```sql
 CREATE TABLE IF NOT EXISTS settings (
@@ -33,7 +34,8 @@ CREATE TABLE IF NOT EXISTS settings (
     jwt_claim_username TEXT DEFAULT 'username',
     jwt_claim_name TEXT DEFAULT 'name',
     jwt_claim_email TEXT DEFAULT 'email',
-    is_setup_completed INTEGER DEFAULT 0
+    is_setup_completed INTEGER DEFAULT 0,
+    logout_redirect_url TEXT DEFAULT ''
 );
 ```
 
@@ -101,3 +103,4 @@ CREATE TABLE IF NOT EXISTS unterrichtsbesuche (
 
 ## Änderungen und Historie
 - **2026-07-17:** Initiale Tabellenstruktur definiert. Feld `jwt_secret` zu `settings` hinzugefügt.
+- **2026-07-17 (Update 2):** Feld `logout_redirect_url` zur Tabelle `settings` hinzugefügt, um eine konfigurierbare Weiterleitung beim Abmelden zu ermöglichen.

@@ -113,8 +113,11 @@ async function authMiddleware(req, res, next) {
 router.get('/api/setup-status', async (req, res) => {
     try {
         const db = await getDatabase();
-        const settings = await db.get('SELECT is_setup_completed FROM settings WHERE id = 1');
-        res.json({ is_setup_completed: settings ? !!settings.is_setup_completed : false });
+        const settings = await db.get('SELECT is_setup_completed, logout_redirect_url FROM settings WHERE id = 1');
+        res.json({
+            is_setup_completed: settings ? !!settings.is_setup_completed : false,
+            logout_redirect_url: settings ? settings.logout_redirect_url || '' : ''
+        });
     } catch (err) {
         console.error('Fehler beim Abrufen des Setup-Status:', err);
         res.status(500).json({ error: 'Interner Serverfehler' });
@@ -183,7 +186,8 @@ router.post('/api/settings', async (req, res, next) => {
         jwt_secret,
         jwt_claim_username,
         jwt_claim_name,
-        jwt_claim_email
+        jwt_claim_email,
+        logout_redirect_url
     } = req.body;
 
     const db = await getDatabase();
@@ -199,6 +203,7 @@ router.post('/api/settings', async (req, res, next) => {
         UPDATE settings
         SET smtp_host = ?, smtp_port = ?, smtp_user = ?, smtp_pass = ?, smtp_from = ?,
             jwt_secret = ?, jwt_claim_username = ?, jwt_claim_name = ?, jwt_claim_email = ?,
+            logout_redirect_url = ?,
             is_setup_completed = 1
         WHERE id = 1
     `, [
@@ -210,7 +215,8 @@ router.post('/api/settings', async (req, res, next) => {
         jwt_secret || '',
         jwt_claim_username || 'username',
         jwt_claim_name || 'name',
-        jwt_claim_email || 'email'
+        jwt_claim_email || 'email',
+        logout_redirect_url || ''
     ]);
 
     res.json({ message: 'Einstellungen erfolgreich gespeichert.' });

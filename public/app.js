@@ -1,6 +1,7 @@
 // API Helper
 let currentUser = null;
 let setupCompleted = false;
+let globalLogoutUrl = ''; // Wird beim App-Start aus dem Setup-Status geladen
 
 const BASE_PATH = '/unterrichtsbesuch';
 
@@ -35,8 +36,7 @@ async function apiFetch(url, options = {}) {
     const response = await fetch(BASE_PATH + url, options);
     
     if (response.status === 401) {
-        removeToken();
-        showView('login');
+        handleLogout();
         throw new Error('Nicht autorisiert oder Session abgelaufen');
     }
     
@@ -48,8 +48,42 @@ async function apiFetch(url, options = {}) {
     return response.json();
 }
 
-// View-Management
+// Zentrale Logout-Funktion mit Weiterleitung
+function handleLogout() {
+    removeToken();
+    currentUser = null;
+    document.getElementById('nav-teacher-dashboard').classList.add('hidden');
+    document.getElementById('nav-sl-dashboard').classList.add('hidden');
+    document.getElementById('nav-admin').classList.add('hidden');
+    
+    if (globalLogoutUrl) {
+        console.log('Redirecting to logout URL:', globalLogoutUrl);
+        window.location.href = globalLogoutUrl;
+    } else {
+        showView('login');
+    }
+}
+
+// View-Management mit Berechtigungsprüfung
 function showView(viewName) {
+    // 1. Berechtigungen prüfen, falls ein Benutzer angemeldet ist
+    if (currentUser) {
+        const role = currentUser.role;
+        
+        if (role === 'user') {
+            // Normale Lehrkräfte dürfen NUR den Teacher-View sehen
+            if (viewName !== 'teacher') {
+                viewName = 'teacher';
+            }
+        } else if (role === 'schulleitung') {
+            // Schulleitung darf NUR den Schulleitungs-View sehen
+            if (viewName !== 'sl') {
+                viewName = 'sl';
+            }
+        }
+        // Admin darf alle Views sehen, keine Einschränkung
+    }
+
     // Alle Views verstecken
     document.getElementById('setup-view').classList.add('hidden');
     document.getElementById('login-view').classList.add('hidden');
@@ -99,9 +133,10 @@ async function initApp() {
             window.history.replaceState({}, document.title, cleanUrl);
         }
 
-        // 2. Setup-Status prüfen
+        // 2. Setup-Status & Logout-URL prüfen
         const statusData = await apiFetch('/api/setup-status');
         setupCompleted = statusData.is_setup_completed;
+        globalLogoutUrl = statusData.logout_redirect_url || '';
         
         if (!setupCompleted) {
             // First-Run Setup: Direkt die Setup-Ansicht anzeigen (kein Token nötig)
@@ -130,20 +165,30 @@ async function initApp() {
         document.getElementById('user-display-name').textContent = currentUser.display_name;
         document.getElementById('user-role-badge').textContent = translateRole(currentUser.role);
         
-        // Navigation einblenden
-        if (currentUser.role === 'schulleitung' || currentUser.role === 'admin') {
-            document.getElementById('nav-sl-dashboard').classList.remove('hidden');
-        } else {
-            document.getElementById('nav-sl-dashboard').classList.add('hidden');
-        }
-        
-        if (currentUser.role === 'admin') {
-            document.getElementById('nav-admin').classList.remove('hidden');
-        } else {
-            document.getElementById('nav-admin').classList.add('hidden');
-        }
+        // Navigation / Reiter ein- und ausblenden basierend auf der Rolle:
+        // - user: Sieht nur Dashboard
+        // - schulleitung: Sieht nur Schulleitung
+        // - admin: Sieht alle Reiter
+        const navTeacher = document.getElementById('nav-teacher-dashboard');
+        const navSl = document.getElementById('nav-sl-dashboard');
+        const navAdmin = document.getElementById('nav-admin');
 
-        showView('teacher');
+        if (currentUser.role === 'user') {
+            navTeacher.classList.remove('hidden');
+            navSl.classList.add('hidden');
+            navAdmin.classList.add('hidden');
+            showView('teacher');
+        } else if (currentUser.role === 'schulleitung') {
+            navTeacher.classList.add('hidden');
+            navSl.classList.remove('hidden');
+            navAdmin.classList.add('hidden');
+            showView('sl');
+        } else if (currentUser.role === 'admin') {
+            navTeacher.classList.remove('hidden');
+            navSl.classList.remove('hidden');
+            navAdmin.classList.remove('hidden');
+            showView('teacher'); // Admin startet standardmäßig auf dem Lehrer-Dashboard
+        }
     } catch (err) {
         console.error('Initialisierungsfehler:', err);
         showView('login');
@@ -187,7 +232,8 @@ document.getElementById('setup-form').addEventListener('submit', async (e) => {
         jwt_claim_username: document.getElementById('setup-jwt-username').value,
         jwt_claim_name: document.getElementById('setup-jwt-name').value,
         jwt_claim_email: document.getElementById('setup-jwt-email').value,
-        jwt_secret: document.getElementById('setup-jwt-secret').value
+        jwt_secret: document.getElementById('setup-jwt-secret').value,
+        logout_redirect_url: document.getElementById('setup-logout-url').value
     };
 
     try {
@@ -214,7 +260,8 @@ document.getElementById('admin-settings-form').addEventListener('submit', async 
         jwt_claim_username: document.getElementById('admin-jwt-username').value,
         jwt_claim_name: document.getElementById('admin-jwt-name').value,
         jwt_claim_email: document.getElementById('admin-jwt-email').value,
-        jwt_secret: document.getElementById('admin-jwt-secret').value
+        jwt_secret: document.getElementById('admin-jwt-secret').value,
+        logout_redirect_url: document.getElementById('admin-logout-url').value
     };
 
     try {
@@ -229,13 +276,9 @@ document.getElementById('admin-settings-form').addEventListener('submit', async 
     }
 });
 
-// Logout Button
+// Logout Button Click
 document.getElementById('logout-btn').addEventListener('click', () => {
-    removeToken();
-    currentUser = null;
-    document.getElementById('nav-sl-dashboard').classList.add('hidden');
-    document.getElementById('nav-admin').classList.add('hidden');
-    showView('login');
+    handleLogout();
 });
 
 // Navigation Links
@@ -650,6 +693,7 @@ async function loadAdminDashboard() {
         document.getElementById('admin-jwt-name').value = settings.jwt_claim_name || 'name';
         document.getElementById('admin-jwt-email').value = settings.jwt_claim_email || 'email';
         document.getElementById('admin-jwt-secret').value = ''; // Secret wird nicht angezeigt
+        document.getElementById('admin-logout-url').value = settings.logout_redirect_url || '';
 
         // Benutzerliste laden
         const users = await apiFetch('/api/users');

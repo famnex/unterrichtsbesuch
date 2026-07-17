@@ -61,12 +61,20 @@ async function getDatabase() {
         );
     `);
 
+    // Migration: Prüfen, ob logout_redirect_url Spalte in settings existiert
+    const columns = await db.all("PRAGMA table_info(settings)");
+    const hasLogoutUrl = columns.some(c => c.name === 'logout_redirect_url');
+    if (!hasLogoutUrl) {
+        await db.run("ALTER TABLE settings ADD COLUMN logout_redirect_url TEXT DEFAULT '';");
+        console.log("Datenbank-Migration: Spalte logout_redirect_url zur Tabelle settings hinzugefügt.");
+    }
+
     // Standardeintrag in settings erzeugen, falls nicht vorhanden
     const settingsExist = await db.get('SELECT id FROM settings WHERE id = 1');
     if (!settingsExist) {
         await db.run(`
-            INSERT INTO settings (id, jwt_secret, jwt_claim_username, jwt_claim_name, jwt_claim_email, is_setup_completed)
-            VALUES (1, '', 'username', 'name', 'email', 0)
+            INSERT INTO settings (id, jwt_secret, jwt_claim_username, jwt_claim_name, jwt_claim_email, is_setup_completed, logout_redirect_url)
+            VALUES (1, '', 'username', 'name', 'email', 0, '')
         `);
     }
 
