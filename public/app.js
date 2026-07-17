@@ -177,7 +177,7 @@ async function initApp() {
         const navAdmin = document.getElementById('nav-admin');
 
         if (currentUser.role === 'user') {
-            navTeacher.remove('hidden');
+            navTeacher.classList.remove('hidden');
             navSl.classList.add('hidden');
             navAdmin.classList.add('hidden');
             showView('teacher');
@@ -551,6 +551,26 @@ document.getElementById('ub-form').addEventListener('submit', async (e) => {
         }
 
         ubModal.classList.add('hidden');
+        
+        // NEU: Nach dem Speichern fragen, ob gleich eingereicht werden soll
+        // Nur fragen, wenn der Unterrichtsbesuch noch im Entwurf (draft) ist
+        if (savedUb && savedUb.status === 'draft') {
+            const confirmSubmit = confirm(
+                "Möchten Sie diesen Unterrichtsbesuch jetzt direkt einreichen?\n\n" +
+                "Hinweis:\n" +
+                "Nach dem Einreichen können die Formulardaten nicht mehr geändert werden.\n" +
+                "Der Unterrichtsentwurf (PDF) kann jedoch auch im Nachhinein jederzeit hochgeladen oder durch eine neuere Version ersetzt werden."
+            );
+            
+            if (confirmSubmit) {
+                await apiFetch(`/api/unterrichtsbesuche/${savedUb.id}`, {
+                    method: 'PUT',
+                    body: { status: 'submitted' }
+                });
+                alert('Unterrichtsbesuch erfolgreich eingereicht!');
+            }
+        }
+
         loadTeacherDashboard();
     } catch (err) {
         alert('Fehler beim Speichern: ' + err.message);
