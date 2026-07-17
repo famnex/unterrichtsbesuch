@@ -3,6 +3,7 @@ let currentUser = null;
 let setupCompleted = false;
 let globalLogoutUrl = ''; // Wird beim App-Start aus dem Setup-Status geladen
 let pendingSubmitUbId = null; // Speichert die ID des UBs, das auf Bestätigung zur Einreichung wartet
+let adminUsersList = []; // Speichert die geladene Benutzerliste im Admin-Bereich
 
 const BASE_PATH = '/unterrichtsbesuch';
 
@@ -705,9 +706,6 @@ function renderSLDashboard() {
 
     const now = new Date();
 
-    // UBs filtern: 
-    // - Keine Entwürfe (draft)
-    // - Abgesagte UBs (cancelled) NUR anzeigen, wenn der Termin noch in der Zukunft liegt!
     const visibleUbs = allSchoolUbs.filter(ub => {
         if (ub.status === 'draft') return false;
         if (ub.status === 'cancelled') {
@@ -780,7 +778,6 @@ function renderSLDashboard() {
                  </button>`;
         }
 
-        // Falls Admin angemeldet ist, kriegt er zusätzlich einen roten Löschen-Button!
         if (currentUser.role === 'admin') {
             actionsHtml += `
                 <button class="btn btn-danger btn-icon" style="margin-left: 8px;" onclick="deleteUb(${ub.id})" title="Dauerhaft löschen (lautlos)">
@@ -857,7 +854,6 @@ async function deleteUb(id) {
 // ----------------------------------------------------
 let activeAdminTab = 'users'; // 'users', 'settings', 'update'
 
-// Admin Tabs Event Listeners registrieren
 function initAdminEvents() {
     const tabUsers = document.getElementById('tab-admin-users');
     const tabSettings = document.getElementById('tab-admin-settings');
@@ -873,6 +869,35 @@ function initAdminEvents() {
     const btnUpdate = document.getElementById('btn-run-update');
     if (btnUpdate) {
         btnUpdate.addEventListener('click', runSystemUpdate);
+    }
+
+    // Event Listener für Benutzer-Edit-Modal
+    const userModal = document.getElementById('user-edit-modal');
+    if (userModal) {
+        document.getElementById('btn-close-user-modal').addEventListener('click', () => userModal.classList.add('hidden'));
+        document.getElementById('btn-cancel-user-modal').addEventListener('click', () => userModal.classList.add('hidden'));
+        
+        document.getElementById('user-edit-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('edit-user-id').value;
+            const userData = {
+                display_name: document.getElementById('edit-user-name').value,
+                email: document.getElementById('edit-user-email').value,
+                role: document.getElementById('edit-user-role').value
+            };
+
+            try {
+                await apiFetch(`/api/users/${id}`, {
+                    method: 'PUT',
+                    body: userData
+                });
+                alert('Benutzer erfolgreich aktualisiert.');
+                userModal.classList.add('hidden');
+                loadAdminDashboard();
+            } catch (err) {
+                alert('Fehler beim Speichern des Benutzers: ' + err.message);
+            }
+        });
     }
 }
 
@@ -908,8 +933,8 @@ async function loadAdminDashboard() {
         document.getElementById('admin-logout-url').value = settings.logout_redirect_url || '';
 
         // Benutzerliste laden
-        const users = await apiFetch('/api/users');
-        renderAdminUsers(users);
+        adminUsersList = await apiFetch('/api/users');
+        renderAdminUsers(adminUsersList);
 
         // Update Log-Feld zurücksetzen
         document.getElementById('update-log-container').classList.add('hidden');
@@ -933,16 +958,15 @@ function renderAdminUsers(users) {
     users.forEach(u => {
         const tr = document.createElement('tr');
         
-        let roleDropdown = `<select onchange="changeUserRole('${u.id}', this.value)" ${u.id === currentUser.id ? 'disabled' : ''}>
-            <option value="user" ${u.role === 'user' ? 'selected' : ''}>Lehrkraft</option>
-            <option value="schulleitung" ${u.role === 'schulleitung' ? 'selected' : ''}>Schulleitung</option>
-            <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Administrator</option>
-        </select>`;
+        const editBtn = `<button class="btn btn-secondary btn-icon" onclick="openEditUserModal('${u.id}')" title="Benutzer bearbeiten">
+            <i data-lucide="edit"></i>
+        </button>`;
 
         tr.innerHTML = `
             <td><strong>${u.username}</strong></td>
-            <td>${u.display_name || ''}<br><small>${u.email || ''}</small></td>
-            <td>${roleDropdown}</td>
+            <td><strong>${u.display_name || ''}</strong><br><small>${u.email || 'Keine E-Mail'}</small></td>
+            <td><span class="badge">${translateRole(u.role)}</span></td>
+            <td>${editBtn}</td>
         `;
         tbody.appendChild(tr);
     });
@@ -950,16 +974,18 @@ function renderAdminUsers(users) {
     lucide.createIcons();
 }
 
-async function changeUserRole(userId, newRole) {
-    try {
-        await apiFetch(`/api/users/${userId}/role`, {
-            method: 'PUT',
-            body: { role: newRole }
-        });
-        loadAdminDashboard();
-    } catch (err) {
-        alert('Rollenänderung fehlgeschlagen: ' + err.message);
-    }
+// Öffnet das Modal zum Bearbeiten eines Benutzers
+function openEditUserModal(userId) {
+    const user = adminUsersList.find(u => u.id === userId);
+    if (!user) return;
+
+    document.getElementById('edit-user-id').value = user.id;
+    document.getElementById('edit-user-username').value = user.username;
+    document.getElementById('edit-user-name').value = user.display_name || '';
+    document.getElementById('edit-user-email').value = user.email || '';
+    document.getElementById('edit-user-role').value = user.role;
+
+    document.getElementById('user-edit-modal').classList.remove('hidden');
 }
 
 // ----------------------------------------------------
@@ -993,7 +1019,6 @@ async function runSystemUpdate() {
             throw new Error(errData.error || 'Fehler beim Starten des Updates.');
         }
 
-        // Live Log-Output aus dem Stream lesen
         const reader = response.body.getReader();
         const decoder = new TextDecoder('utf-8');
         
@@ -1003,13 +1028,11 @@ async function runSystemUpdate() {
             
             const chunk = decoder.decode(value, { stream: true });
             logElement.textContent += chunk;
-            // Nach unten scrollen
             logElement.scrollTop = logElement.scrollHeight;
         }
 
         logElement.textContent += '\n\n[INFO] Update-Befehle beendet. Warte auf Server-Neustart...\n';
         
-        // Timer für den automatischen Page-Reload starten (Server startet sich ja neu)
         let countdown = 5;
         const interval = setInterval(() => {
             logElement.textContent += `Lade Seite neu in ${countdown} Sekunden...\n`;
@@ -1024,7 +1047,7 @@ async function runSystemUpdate() {
     } catch (err) {
         logElement.textContent += `\n[FEHLER] ${err.message}\n`;
         btnUpdate.disabled = false;
-        btnUpdate.innerHTML = '<i data-lucide="refresh-cw"></i> Update fehlgeschlagen - Erneut versuchen';
+        btnUpdate.innerHTML = '<i data-lucide="refresh-cw"></i> Update failed - Try again';
         lucide.createIcons();
     }
 }
@@ -1036,7 +1059,7 @@ window.cancelUb = cancelUb;
 window.openUploadModal = openUploadModal;
 window.assignSL = assignSL;
 window.deleteUb = deleteUb;
-window.changeUserRole = changeUserRole;
+window.openEditUserModal = openEditUserModal;
 
 // Start und Events
 initAdminEvents();

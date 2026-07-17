@@ -294,6 +294,24 @@ router.put('/api/users/:id/role', authMiddleware, async (req, res) => {
     res.json({ message: 'Rolle erfolgreich aktualisiert.' });
 });
 
+// API: Benutzer aktualisieren (Klarname, E-Mail, Rolle - nur Admin)
+router.put('/api/users/:id', authMiddleware, async (req, res) => {
+    if (req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Keine Berechtigung' });
+    }
+    const { display_name, email, role } = req.body;
+    if (!['user', 'schulleitung', 'admin'].includes(role)) {
+        return res.status(400).json({ error: 'Ungültige Rolle' });
+    }
+
+    const db = await getDatabase();
+    await db.run(
+        'UPDATE users SET display_name = ?, email = ?, role = ? WHERE id = ?',
+        [display_name || '', email || '', role, req.params.id]
+    );
+    res.json({ message: 'Benutzer erfolgreich aktualisiert.' });
+});
+
 // API: Alle Schulleitungs-Mitglieder und Admins abrufen (für Dropdown)
 router.get('/api/schulleitung-users', authMiddleware, async (req, res) => {
     const db = await getDatabase();

@@ -211,6 +211,7 @@
                                     <th>Benutzername</th>
                                     <th>Klarname / E-Mail</th>
                                     <th>Rolle</th>
+                                    <th>Aktionen</th>
                                 </tr>
                             </thead>
                             <tbody id="admin-users-table-body">
@@ -376,6 +377,45 @@
                 <button type="button" class="btn btn-secondary" id="btn-confirm-no">Nein, als Entwurf belassen</button>
                 <button type="button" class="btn btn-primary" id="btn-confirm-yes">Ja, jetzt einreichen</button>
             </div>
+        </div>
+    </div>
+
+    <!-- MODAL: Benutzer bearbeiten (Admin) -->
+    <div id="user-edit-modal" class="modal hidden">
+        <div class="modal-content glass-card" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2>Benutzer bearbeiten</h2>
+                <button class="btn-close" id="btn-close-user-modal">&times;</button>
+            </div>
+            <form id="user-edit-form">
+                <input type="hidden" id="edit-user-id">
+                <div class="form-grid">
+                    <div class="form-group full-width">
+                        <label for="edit-user-username">Benutzername</label>
+                        <input type="text" id="edit-user-username" readonly style="background: hsla(222, 30%, 12%, 0.5); color: var(--text-muted);">
+                    </div>
+                    <div class="form-group full-width">
+                        <label for="edit-user-name">Klarname</label>
+                        <input type="text" id="edit-user-name" required>
+                    </div>
+                    <div class="form-group full-width">
+                        <label for="edit-user-email">E-Mail-Adresse</label>
+                        <input type="email" id="edit-user-email">
+                    </div>
+                    <div class="form-group full-width">
+                        <label for="edit-user-role">Rolle</label>
+                        <select id="edit-user-role" required>
+                            <option value="user">Lehrkraft</option>
+                            <option value="schulleitung">Schulleitung</option>
+                            <option value="admin">Administrator</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" id="btn-cancel-user-modal">Abbrechen</button>
+                    <button type="submit" class="btn btn-primary">Speichern</button>
+                </div>
+            </form>
         </div>
     </div>
 
