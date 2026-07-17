@@ -3,6 +3,7 @@ const multer = require('multer');
 const jwt = require('jsonwebtoken');
 const path = require('path');
 const fs = require('fs');
+const { spawn } = require('child_process');
 const { getDatabase } = require('./db');
 const { sendUBSubmittedMail, sendUBAssignedMails } = require('./mailer');
 
@@ -42,6 +43,36 @@ const upload = multer({
 const router = express.Router();
 
 router.use(express.json());
+
+// Helper zum Ausführen eines Shell-Befehls und Streamen der Logs
+function runCommandStream(command, args, res) {
+    return new Promise((resolve, reject) => {
+        const isWindows = process.platform === 'win32';
+        const shell = isWindows ? 'cmd.exe' : '/bin/sh';
+        const shellArgs = isWindows ? ['/c', `${command} ${args.join(' ')}`] : ['-c', `${command} ${args.join(' ')}`];
+
+        res.write(`\n=== Führe aus: ${command} ${args.join(' ')} ===\n`);
+        const proc = spawn(shell, shellArgs, { cwd: path.join(__dirname) });
+
+        proc.stdout.on('data', (data) => {
+            res.write(data.toString());
+        });
+
+        proc.stderr.on('data', (data) => {
+            res.write(data.toString());
+        });
+
+        proc.on('close', (code) => {
+            if (code === 0) {
+                res.write(`\n-> ${command} erfolgreich abgeschlossen.\n`);
+                resolve();
+            } else {
+                res.write(`\n-> FEHLER bei ${command} (Exit Code: ${code})\n`);
+                reject(new Error(`${command} fehlgeschlagen`));
+            }
+        });
+    });
+}
 
 // Middleware zur Authentifizierung und JWT Claim-Mapping
 async function authMiddleware(req, res, next) {
@@ -450,6 +481,43 @@ router.post('/api/unterrichtsbesuche/:id/upload', authMiddleware, upload.single(
     await db.run('UPDATE unterrichtsbesuche SET file_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [relativePath, req.params.id]);
 
     res.json({ file_path: relativePath, message: 'PDF-Entwurf erfolgreich hochgeladen.' });
+});
+
+// API: System-Update ausführen (Online Git Pull & NPM Install mit Live-Logging)
+router.post('/api/admin/update', authMiddleware, async (req, res) => {
+    if (req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Keine Berechtigung' });
+    }
+
+    // Setze Header für Chunked Transfer (Streaming)
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Transfer-Encoding', 'chunked');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    res.write("Starte System-Update...\n");
+
+    try {
+        // 1. Git Pull ausführen
+        await runCommandStream('git', ['pull'], res);
+
+        // 2. NPM Install ausführen
+        await runCommandStream('npm', ['install'], res);
+
+        res.write("\n=== Update erfolgreich abgeschlossen! ===\n");
+        res.write("Der Server startet sich in 2 Sekunden neu...\n");
+        res.end();
+
+        // 3. Server nach 2 Sekunden beenden (PM2 / systemd startet ihn neu)
+        setTimeout(() => {
+            console.log("Server beendet sich für automatischen Neustart nach Update.");
+            process.exit(0);
+        }, 2000);
+
+    } catch (err) {
+        res.write(`\n=== UPDATE FEHLGESCHLAGEN: ${err.message} ===\n`);
+        res.end();
+    }
 });
 
 // Router in Express einbinden unter dem BASE_PATH

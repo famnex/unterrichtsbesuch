@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Unterrichtsbesuche-Verwaltung</title>
+    <title>Unterrichtsbesuch</title>
     <!-- Google Fonts: Outfit -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -189,86 +189,112 @@
                 <div class="section-header">
                     <div>
                         <h1>Administration & Einstellungen</h1>
-                        <p class="subtitle">Verwalten Sie globale SMTP/JWT-Parameter und weisen Sie Rollen zu.</p>
+                        <p class="subtitle">Verwalten Sie Rollen, SMTP/JWT-Parameter und führen Sie System-Updates durch.</p>
                     </div>
                 </div>
 
-                <div class="admin-grid">
-                    <!-- Links: Einstellungs-Formular -->
-                    <div class="glass-card">
-                        <h3>🛠️ Systemeinstellungen</h3>
-                        <form id="admin-settings-form">
-                            <div class="form-group-title">SMTP-Einstellungen</div>
-                            <div class="form-grid">
-                                <div class="form-group">
-                                    <label for="admin-smtp-host">SMTP-Host</label>
-                                    <input type="text" id="admin-smtp-host" required>
-                                </div>
-                                <div class="form-group">
-                                    <label for="admin-smtp-port">Port</label>
-                                    <input type="number" id="admin-smtp-port" required>
-                                </div>
-                                <div class="form-group">
-                                    <label for="admin-smtp-user">Benutzername</label>
-                                    <input type="text" id="admin-smtp-user" required>
-                                </div>
-                                <div class="form-group">
-                                    <label for="admin-smtp-pass">Passwort</label>
-                                    <input type="password" id="admin-smtp-pass" required>
-                                </div>
-                                <div class="form-group full-width">
-                                    <label for="admin-smtp-from">Absender-Adresse</label>
-                                    <input type="email" id="admin-smtp-from" required>
-                                </div>
-                            </div>
+                <!-- Admin Tabs -->
+                <div class="tab-container" style="margin-bottom: 30px;">
+                    <button class="tab-btn active" id="tab-admin-users">👥 Benutzermanagement</button>
+                    <button class="tab-btn" id="tab-admin-settings">🛠️ Systemeinstellungen</button>
+                    <button class="tab-btn" id="tab-admin-update">🔄 System-Update</button>
+                </div>
 
-                            <div class="form-group-title">JWT-Claim-Mapping</div>
-                            <div class="form-grid">
-                                <div class="form-group">
-                                    <label for="admin-jwt-username">Benutzername Claim</label>
-                                    <input type="text" id="admin-jwt-username" required>
-                                </div>
-                                <div class="form-group">
-                                    <label for="admin-jwt-name">Klarname Claim</label>
-                                    <input type="text" id="admin-jwt-name" required>
-                                </div>
-                                <div class="form-group">
-                                    <label for="admin-jwt-email">E-Mail Claim</label>
-                                    <input type="text" id="admin-jwt-email" required>
-                                </div>
-                                <div class="form-group">
-                                    <label for="admin-jwt-secret">JWT Secret</label>
-                                    <input type="password" id="admin-jwt-secret" placeholder="Unverändert lassen, falls leer">
-                                </div>
-                                <div class="form-group full-width">
-                                    <label for="admin-logout-url">Logout Weiterleitungs-URL</label>
-                                    <input type="url" id="admin-logout-url" placeholder="https://sso.example.com/logout">
-                                </div>
-                            </div>
+                <!-- Admin Tab Content 1: Benutzermanagement -->
+                <div id="panel-admin-users" class="glass-card">
+                    <h3>👥 Benutzermanagement</h3>
+                    <p class="subtitle" style="margin-bottom: 24px;">Hier können Sie registrierte Benutzer einsehen und ihre Rollen anpassen.</p>
+                    <div class="table-wrapper">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Benutzername</th>
+                                    <th>Klarname / E-Mail</th>
+                                    <th>Rolle</th>
+                                </tr>
+                            </thead>
+                            <tbody id="admin-users-table-body">
+                                <!-- Wird dynamisch befüllt -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
 
-                            <button type="submit" class="btn btn-primary full-width">
-                                <i data-lucide="save"></i> Einstellungen aktualisieren
-                            </button>
-                        </form>
+                <!-- Admin Tab Content 2: Systemeinstellungen -->
+                <div id="panel-admin-settings" class="glass-card hidden">
+                    <h3>🛠️ Systemeinstellungen</h3>
+                    <p class="subtitle" style="margin-bottom: 24px;">Konfigurieren Sie globale Parameter für SMTP und das JWT-Mapping.</p>
+                    <form id="admin-settings-form">
+                        <div class="form-group-title">SMTP-Einstellungen</div>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="admin-smtp-host">SMTP-Host</label>
+                                <input type="text" id="admin-smtp-host" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="admin-smtp-port">Port</label>
+                                <input type="number" id="admin-smtp-port" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="admin-smtp-user">Benutzername</label>
+                                <input type="text" id="admin-smtp-user" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="admin-smtp-pass">Passwort</label>
+                                <input type="password" id="admin-smtp-pass" required>
+                            </div>
+                            <div class="form-group full-width">
+                                <label for="admin-smtp-from">Absender-Adresse</label>
+                                <input type="email" id="admin-smtp-from" required>
+                            </div>
+                        </div>
+
+                        <div class="form-group-title">JWT-Claim-Mapping</div>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="admin-jwt-username">Benutzername Claim</label>
+                                <input type="text" id="admin-jwt-username" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="admin-jwt-name">Klarname Claim</label>
+                                <input type="text" id="admin-jwt-name" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="admin-jwt-email">E-Mail Claim</label>
+                                <input type="text" id="admin-jwt-email" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="admin-jwt-secret">JWT Secret</label>
+                                <input type="password" id="admin-jwt-secret" placeholder="Unverändert lassen, falls leer">
+                            </div>
+                            <div class="form-group full-width">
+                                <label for="admin-logout-url">Logout Weiterleitungs-URL</label>
+                                <input type="url" id="admin-logout-url" placeholder="https://sso.example.com/logout">
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary full-width" style="margin-top: 24px;">
+                            <i data-lucide="save"></i> Einstellungen aktualisieren
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Admin Tab Content 3: Update -->
+                <div id="panel-admin-update" class="glass-card hidden">
+                    <h3>🔄 System-Update</h3>
+                    <p class="subtitle" style="margin-bottom: 24px;">Führen Sie ein Online-Update des Systems direkt über Git & NPM durch.</p>
+                    
+                    <div style="margin-bottom: 24px; padding: 16px; background: hsla(40, 90%, 55%, 0.15); border-left: 4px solid var(--warning); border-radius: 6px; font-size: 0.95rem;">
+                        <strong>Achtung:</strong> Das Update zieht den neuesten Code aus dem Git-Repository und installiert eventuelle neue Abhängigkeiten. Der Node-Prozess startet sich am Ende neu. Die Verbindung wird kurzzeitig getrennt.
                     </div>
 
-                    <!-- Rechts: Benutzermanagement -->
-                    <div class="glass-card">
-                        <h3>👥 Benutzermanagement</h3>
-                        <div class="table-wrapper">
-                            <table class="data-table">
-                                <thead>
-                                    <tr>
-                                        <th>Benutzername</th>
-                                        <th>Klarname</th>
-                                        <th>Rolle</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="admin-users-table-body">
-                                    <!-- Wird dynamisch befüllt -->
-                                </tbody>
-                            </table>
-                        </div>
+                    <button id="btn-run-update" class="btn btn-primary">
+                        <i data-lucide="refresh-cw"></i> Update jetzt starten
+                    </button>
+                    
+                    <div id="update-log-container" class="hidden" style="margin-top: 28px;">
+                        <label style="font-weight: 600; display: block; margin-bottom: 10px;">Live-Update Protokoll:</label>
+                        <pre id="update-log" style="background: #04060c; border: 1px solid var(--border-card); border-radius: 6px; padding: 20px; font-family: monospace; font-size: 0.9rem; color: #10b981; overflow-y: auto; max-height: 400px; white-space: pre-wrap; line-height: 1.5;"></pre>
                     </div>
                 </div>
             </section>

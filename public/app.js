@@ -760,8 +760,45 @@ async function assignSL(ubId, slId) {
 }
 
 // ----------------------------------------------------
-// ADMIN DASHBOARD
+// ADMIN DASHBOARD & TABS
 // ----------------------------------------------------
+let activeAdminTab = 'users'; // 'users', 'settings', 'update'
+
+// Admin Tabs Event Listeners registrieren
+function initAdminEvents() {
+    const tabUsers = document.getElementById('tab-admin-users');
+    const tabSettings = document.getElementById('tab-admin-settings');
+    const tabUpdate = document.getElementById('tab-admin-update');
+    
+    if (tabUsers && tabSettings && tabUpdate) {
+        tabUsers.addEventListener('click', () => switchAdminTab('users'));
+        tabSettings.addEventListener('click', () => switchAdminTab('settings'));
+        tabUpdate.addEventListener('click', () => switchAdminTab('update'));
+    }
+
+    // Update-Button Listener
+    const btnUpdate = document.getElementById('btn-run-update');
+    if (btnUpdate) {
+        btnUpdate.addEventListener('click', runSystemUpdate);
+    }
+}
+
+function switchAdminTab(tabName) {
+    activeAdminTab = tabName;
+    
+    // Buttons toggeln
+    document.getElementById('tab-admin-users').classList.toggle('active', tabName === 'users');
+    document.getElementById('tab-admin-settings').classList.toggle('active', tabName === 'settings');
+    document.getElementById('tab-admin-update').classList.toggle('active', tabName === 'update');
+
+    // Panels toggeln
+    document.getElementById('panel-admin-users').classList.toggle('hidden', tabName !== 'users');
+    document.getElementById('panel-admin-settings').classList.toggle('hidden', tabName !== 'settings');
+    document.getElementById('panel-admin-update').classList.toggle('hidden', tabName !== 'update');
+    
+    lucide.createIcons();
+}
+
 async function loadAdminDashboard() {
     try {
         // Einstellungsdaten laden
@@ -780,6 +817,17 @@ async function loadAdminDashboard() {
         // Benutzerliste laden
         const users = await apiFetch('/api/users');
         renderAdminUsers(users);
+
+        // Update Log-Feld zurücksetzen
+        document.getElementById('update-log-container').classList.add('hidden');
+        document.getElementById('update-log').textContent = '';
+        const btnUpdate = document.getElementById('btn-run-update');
+        if (btnUpdate) {
+            btnUpdate.disabled = false;
+            btnUpdate.innerHTML = '<i data-lucide="refresh-cw"></i> Update jetzt starten';
+        }
+        
+        lucide.createIcons();
     } catch (err) {
         console.error('Fehler beim Laden des Admin-Dashboards:', err);
     }
@@ -821,6 +869,73 @@ async function changeUserRole(userId, newRole) {
     }
 }
 
+// ----------------------------------------------------
+// LIVE SYSTEM UPDATE LOGIC (SSE-like Chunked Reader)
+// ----------------------------------------------------
+async function runSystemUpdate() {
+    const btnUpdate = document.getElementById('btn-run-update');
+    const logContainer = document.getElementById('update-log-container');
+    const logElement = document.getElementById('update-log');
+    
+    if (!confirm("Möchten Sie das System-Update jetzt wirklich starten? Der Server startet sich am Ende neu.")) return;
+
+    btnUpdate.disabled = true;
+    btnUpdate.innerHTML = '<i data-lucide="loader"></i> Update wird ausgeführt...';
+    logContainer.classList.remove('hidden');
+    logElement.textContent = 'Verbindung zum Update-Server wird hergestellt...\n';
+    
+    lucide.createIcons();
+
+    try {
+        const token = getToken();
+        const response = await fetch(BASE_PATH + '/api/admin/update', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+
+        if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            throw new Error(errData.error || 'Fehler beim Starten des Updates.');
+        }
+
+        // Live Log-Output aus dem Stream lesen
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            
+            const chunk = decoder.decode(value, { stream: true });
+            logElement.textContent += chunk;
+            // Nach unten scrollen
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+
+        logElement.textContent += '\n\n[INFO] Update-Befehle beendet. Warte auf Server-Neustart...\n';
+        
+        // Timer für den automatischen Page-Reload starten (Server startet sich ja neu)
+        let countdown = 5;
+        const interval = setInterval(() => {
+            logElement.textContent += `Lade Seite neu in ${countdown} Sekunden...\n`;
+            logElement.scrollTop = logElement.scrollHeight;
+            countdown--;
+            if (countdown < 0) {
+                clearInterval(interval);
+                window.location.reload();
+            }
+        }, 1000);
+
+    } catch (err) {
+        logElement.textContent += `\n[FEHLER] ${err.message}\n`;
+        btnUpdate.disabled = false;
+        btnUpdate.innerHTML = '<i data-lucide="refresh-cw"></i> Update fehlgeschlagen - Erneut versuchen';
+        lucide.createIcons();
+    }
+}
+
 // Global registrieren für inline Event Handler
 window.openEditUbModal = openEditUbModal;
 window.submitUb = submitUb;
@@ -828,5 +943,6 @@ window.openUploadModal = openUploadModal;
 window.assignSL = assignSL;
 window.changeUserRole = changeUserRole;
 
-// Start
+// Start und Events
+initAdminEvents();
 initApp();
