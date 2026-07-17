@@ -125,7 +125,7 @@ async function authMiddleware(req, res, next) {
         const userCountObj = await db.get('SELECT COUNT(*) as count FROM users');
         const isFirstUser = userCountObj.count === 0;
 
-        // Benutzer in DB suchen oder anlegen
+        // Benutzer in DB suchen, anlegen oder aktualisieren
         let user = await db.get('SELECT * FROM users WHERE id = ?', [id]);
         if (!user) {
             const role = isFirstUser ? 'admin' : 'user';
@@ -135,6 +135,16 @@ async function authMiddleware(req, res, next) {
             );
             user = { id, username, display_name: displayName, email, role };
             console.log(`Neuer Benutzer registriert: ${username} als ${role}`);
+        } else {
+            // WICHTIG: Benutzerdaten bei jedem Login aktualisieren, damit Änderungen 
+            // im JWT-Claim-Mapping oder beim Identity Provider sofort wirksam werden!
+            await db.run(
+                'UPDATE users SET username = ?, display_name = ?, email = ? WHERE id = ?',
+                [username, displayName, email, id]
+            );
+            user.username = username;
+            user.display_name = displayName;
+            user.email = email;
         }
 
         req.user = user;
