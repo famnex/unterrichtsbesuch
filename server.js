@@ -60,7 +60,13 @@ async function authMiddleware(req, res, next) {
             try {
                 decoded = jwt.verify(token, settings.jwt_secret);
             } catch (err) {
-                return res.status(401).json({ error: 'Ungültiges JWT (Verifizierung fehlgeschlagen)' });
+                let errorMsg = 'Ungültiges JWT (Verifizierung fehlgeschlagen)';
+                if (err.name === 'TokenExpiredError') {
+                    errorMsg = 'JWT ist abgelaufen (Session abgelaufen)';
+                } else if (err.name === 'JsonWebTokenError') {
+                    errorMsg = 'JWT-Signaturprüfung fehlgeschlagen. Stimmt das Secret in den Einstellungen?';
+                }
+                return res.status(401).json({ error: errorMsg });
             }
         } else {
             // Signaturprüfung überspringen (Proxy hat das bereits erledigt)
@@ -296,6 +302,14 @@ router.post('/api/unterrichtsbesuche', authMiddleware, async (req, res) => {
         return res.status(400).json({ error: 'Pflichtfelder fehlen.' });
     }
 
+    // Datum in der Zukunft validieren
+    const ubDate = new Date(date_time);
+    const now = new Date();
+    // 5 Minuten Toleranzpuffer für Client/Server-Zeitschwankungen
+    if (ubDate < new Date(now.getTime() - 5 * 60 * 1000)) {
+        return res.status(400).json({ error: 'Das Datum des Unterrichtsbesuchs muss in der Zukunft liegen.' });
+    }
+
     const db = await getDatabase();
     const finalStatus = status === 'submitted' ? 'submitted' : 'draft';
 
@@ -364,6 +378,15 @@ router.put('/api/unterrichtsbesuche/:id', authMiddleware, async (req, res) => {
     }
 
     const { date_time, room, subject, grade, type, instructor, module, status } = req.body;
+
+    // Datum in der Zukunft validieren, falls geändert
+    if (date_time) {
+        const ubDate = new Date(date_time);
+        const now = new Date();
+        if (ubDate < new Date(now.getTime() - 5 * 60 * 1000)) {
+            return res.status(400).json({ error: 'Das Datum des Unterrichtsbesuchs muss in der Zukunft liegen.' });
+        }
+    }
 
     const finalStatus = status === 'submitted' ? 'submitted' : ub.status;
 

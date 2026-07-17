@@ -36,8 +36,11 @@ async function apiFetch(url, options = {}) {
     const response = await fetch(BASE_PATH + url, options);
     
     if (response.status === 401) {
+        const errorData = await response.json().catch(() => ({}));
+        const errMsg = errorData.error || 'Nicht autorisiert oder Session abgelaufen';
+        alert('Authentifizierungsfehler: ' + errMsg);
         handleLogout();
-        throw new Error('Nicht autorisiert oder Session abgelaufen');
+        throw new Error(errMsg);
     }
     
     if (!response.ok) {
@@ -174,7 +177,7 @@ async function initApp() {
         const navAdmin = document.getElementById('nav-admin');
 
         if (currentUser.role === 'user') {
-            navTeacher.classList.remove('hidden');
+            navTeacher.remove('hidden');
             navSl.classList.add('hidden');
             navAdmin.classList.add('hidden');
             showView('teacher');
@@ -201,6 +204,14 @@ function translateRole(role) {
         case 'schulleitung': return 'Schulleitung';
         default: return 'Lehrkraft';
     }
+}
+
+// Hilfsfunktion: Setzt das Mindestdatum des Datumsfeldes auf JETZT (in lokaler Zeit)
+function setMinDateLimit() {
+    const now = new Date();
+    const tzOffset = now.getTimezoneOffset() * 60000;
+    const localISOTime = (new Date(now - tzOffset)).toISOString().slice(0, 16);
+    document.getElementById('ub-date').setAttribute('min', localISOTime);
 }
 
 // ----------------------------------------------------
@@ -451,6 +462,14 @@ document.getElementById('btn-new-ub').addEventListener('click', () => {
     document.getElementById('ub-form').reset();
     document.getElementById('ub-id').value = '';
     document.getElementById('modal-title').textContent = 'Neuen Unterrichtsbesuch anlegen';
+    
+    // Mindestdatum auf JETZT limitieren
+    setMinDateLimit();
+    
+    // PDF Dateifeld leeren und einblenden
+    document.getElementById('ub-file').value = '';
+    document.getElementById('ub-file-group').classList.remove('hidden');
+    
     ubModal.classList.remove('hidden');
 });
 
@@ -470,13 +489,22 @@ async function openEditUbModal(id) {
     document.getElementById('ub-instructor').value = ub.instructor || '';
     document.getElementById('ub-module').value = ub.module || '';
 
+    // Mindestdatum limitieren
+    setMinDateLimit();
+
+    // PDF Dateifeld für Edit leeren und ebenfalls einblenden (zum Ersetzen)
+    document.getElementById('ub-file').value = '';
+    document.getElementById('ub-file-group').classList.remove('hidden');
+
     document.getElementById('modal-title').textContent = 'Unterrichtsbesuch bearbeiten';
     ubModal.classList.remove('hidden');
 }
 
+// Reichen wir den UB ein und laden optional eine Datei hoch
 document.getElementById('ub-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const id = document.getElementById('ub-id').value;
+    const fileInput = document.getElementById('ub-file');
     
     const ubData = {
         date_time: document.getElementById('ub-date').value,
@@ -489,17 +517,39 @@ document.getElementById('ub-form').addEventListener('submit', async (e) => {
     };
 
     try {
+        let savedUb = null;
         if (id) {
-            await apiFetch(`/api/unterrichtsbesuche/${id}`, {
+            savedUb = await apiFetch(`/api/unterrichtsbesuche/${id}`, {
                 method: 'PUT',
                 body: ubData
             });
         } else {
-            await apiFetch('/api/unterrichtsbesuche', {
+            savedUb = await apiFetch('/api/unterrichtsbesuche', {
                 method: 'POST',
                 body: ubData
             });
         }
+
+        // Falls eine Datei beim Anlegen/Ändern ausgewählt wurde, diese jetzt hochladen
+        if (fileInput && fileInput.files[0] && savedUb && savedUb.id) {
+            const formData = new FormData();
+            formData.append('entwurf', fileInput.files[0]);
+            
+            const token = getToken();
+            const uploadRes = await fetch(`${BASE_PATH}/api/unterrichtsbesuche/${savedUb.id}/upload`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                },
+                body: formData
+            });
+
+            const uploadData = await uploadRes.json();
+            if (!uploadRes.ok) {
+                throw new Error(uploadData.error || 'Fehler beim Upload des Entwurfs');
+            }
+        }
+
         ubModal.classList.add('hidden');
         loadTeacherDashboard();
     } catch (err) {

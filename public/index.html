@@ -305,10 +305,8 @@
                     <div class="form-group">
                         <label for="ub-type">Art</label>
                         <select id="ub-type" required>
-                            <option value="Unterrichtsbesuch">Unterrichtsbesuch (Standard)</option>
-                            <option value="Gemeinsamer Besuch">Gemeinsamer Besuch</option>
-                            <option value="Zweiter Unterrichtsbesuch">Zweiter Unterrichtsbesuch</option>
-                            <option value="Prüfungsbesuch">Prüfungsbesuch</option>
+                            <option value="Unterrichtsbesuch">Unterrichtsbesuch</option>
+                            <option value="Examen">Examen</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -318,6 +316,10 @@
                     <div class="form-group full-width">
                         <label for="ub-module">Modul</label>
                         <input type="text" id="ub-module" placeholder="z. B. Modul 4 - Kompetenzorientierter Unterricht">
+                    </div>
+                    <div class="form-group full-width" id="ub-file-group">
+                        <label for="ub-file">Unterrichtsentwurf (PDF, optional)</label>
+                        <input type="file" id="ub-file" accept="application/pdf">
                     </div>
                 </div>
 
