@@ -33,7 +33,7 @@ async function getTransporter() {
 /**
  * Generiert eine ICS-Datei für ein Event.
  */
-function generateICS(title, description, location, dateStr) {
+function generateICS(title, description, location, dateStr, organizer) {
     return new Promise((resolve, reject) => {
         const dateObj = new Date(dateStr);
         if (isNaN(dateObj.getTime())) {
@@ -58,6 +58,14 @@ function generateICS(title, description, location, dateStr) {
             busyStatus: 'BUSY',
             method: 'REQUEST' // Macht die ICS zur interaktiven Kalendereinladung (für Outlook/Gmail)
         };
+
+        // WICHTIG: Für Outlook/Exchange ist bei einer REQUEST-Methode ein gültiger Organizer Pflicht!
+        if (organizer && organizer.name && organizer.email && organizer.email.trim()) {
+            event.organizer = {
+                name: organizer.name,
+                email: organizer.email.trim()
+            };
+        }
 
         ics.createEvent(event, (error, value) => {
             if (error) {
@@ -196,7 +204,10 @@ async function sendUBAssignedMails(userEmail, userName, slEmail, slName, ubDetai
         const title = `${ubDetails.type}: ${ubDetails.subject} - ${userName}`;
         const description = `${ubDetails.type} von ${userName} im Fach ${ubDetails.subject} (Klasse ${ubDetails.grade}).\nFachleiter: ${ubDetails.instructor || 'n.a.'}\nModul: ${ubDetails.module || 'n.a.'}`;
         const location = `Raum ${ubDetails.room}`;
-        icsContent = await generateICS(title, description, location, ubDetails.date_time);
+        
+        // WICHTIG: Lehrkraft als Organizer übergeben, damit Exchange/Outlook das iCal-Request-Format akzeptiert!
+        const organizer = (userEmail && userEmail.trim()) ? { name: userName, email: userEmail } : null;
+        icsContent = await generateICS(title, description, location, ubDetails.date_time, organizer);
     } catch (err) {
         console.error('Fehler beim Generieren der ICS-Datei:', err);
     }
@@ -205,7 +216,7 @@ async function sendUBAssignedMails(userEmail, userName, slEmail, slName, ubDetai
     const slSubject = `Begleitung Unterrichtsbesuch: ${ubDetails.subject} (${ubDetails.grade}) - ${userName}`;
     const slText = `Hallo ${slName},
 
-du wurdest als Begleitung für den folgenden Unterrichtsbesuch eingetragen bzw. hast diesen übernommen:
+du wurdest als Begleitung for den folgenden Unterrichtsbesuch eingetragen bzw. hast diesen übernommen:
 
 Lehrkraft: ${userName}
 Datum/Uhrzeit: ${dateFormatted}
@@ -283,7 +294,7 @@ Dein Unterrichtsbesuchs-Portal`;
         return;
     }
 
-    // SICHERHEITSPRÜFUNGEN VOR VERSAND (Verhindert 550 InvalidRecipientsException)
+    // SICHERHEITSPRÜFUNGEN VOR VERSAND
     if (slEmail && slEmail.trim()) {
         try {
             const slMailConfig = {
@@ -408,7 +419,10 @@ Dein Unterrichtsbesuchs-Portal`;
             const title = `ABGESAGT: ${ubDetails.type}: ${ubDetails.subject} - ${userName}`;
             const description = `Dieser Termin wurde abgesagt.`;
             const location = `Raum ${ubDetails.room}`;
-            const icsCancelContent = await generateICS(title, description, location, ubDetails.date_time);
+            
+            // WICHTIG: Lehrkraft als Organizer übergeben
+            const organizer = (userEmail && userEmail.trim()) ? { name: userName, email: userEmail } : null;
+            const icsCancelContent = await generateICS(title, description, location, ubDetails.date_time, organizer);
             cancelIcs = icsCancelContent.replace('METHOD:REQUEST', 'METHOD:CANCEL').replace('STATUS:CONFIRMED', 'STATUS:CANCELLED');
         } catch (icsErr) {
             console.error('Fehler bei Stornierungs-ICS-Generierung:', icsErr);
@@ -423,7 +437,7 @@ Dein Unterrichtsbesuchs-Portal`;
         return;
     }
 
-    // SICHERHEITSPRÜFUNGEN VOR VERSAND (Verhindert 550 InvalidRecipientsException)
+    // SICHERHEITSPRÜFUNGEN VOR VERSAND
     if (userEmail && userEmail.trim()) {
         try {
             await transportInfo.transporter.sendMail({
