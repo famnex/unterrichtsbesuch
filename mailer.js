@@ -41,7 +41,7 @@ async function getTransporter() {
 /**
  * Generiert eine ICS-Datei für ein Event.
  */
-function generateICS(title, description, location, dateStr, organizer) {
+function generateICS(title, description, location, dateStr, organizer, attendee) {
     return new Promise((resolve, reject) => {
         const dateObj = new Date(dateStr);
         if (isNaN(dateObj.getTime())) {
@@ -68,16 +68,28 @@ function generateICS(title, description, location, dateStr, organizer) {
         };
 
         // WICHTIG: Für Outlook/Exchange ist bei einer REQUEST-Methode ein Organisator Pflicht.
-        // Um Office 365 Spoofing-Blockaden zu verhindern, MUSS die E-Mail-Adresse des Organizers
-        // exakt mit der SMTP-Absenderadresse (from) übereinstimmen!
+        // Die E-Mail-Adresse des Organizers MUSS der SMTP-Senderadresse (from) entsprechen!
         if (organizer && organizer.name && organizer.email && organizer.email.trim()) {
             event.organizer = {
                 name: organizer.name,
                 email: organizer.email.trim()
             };
             console.log(`[MAIL-DEBUG] ICS Event-Organizer gesetzt: ${organizer.name} <${organizer.email.trim()}>`);
-        } else {
-            console.log('[MAIL-DEBUG] ICS Event-Organizer nicht gesetzt.');
+        }
+
+        // WICHTIG: Exchange liest die Empfänger einer REQUEST-Mail direkt aus den ATTENDEE-Einträgen der ICS!
+        // Fehlen diese, kommt es zum Fehler "550 InvalidRecipientsException: A message can't be sent because it contains no recipients".
+        if (attendee && attendee.name && attendee.email && attendee.email.trim()) {
+            event.attendees = [
+                {
+                    name: attendee.name,
+                    email: attendee.email.trim(),
+                    rsvp: true,
+                    role: 'REQ-PARTICIPANT',
+                    partstat: 'NEEDS-ACTION'
+                }
+            ];
+            console.log(`[MAIL-DEBUG] ICS Event-Attendee (Teilnehmer) gesetzt: ${attendee.name} <${attendee.email.trim()}>`);
         }
 
         ics.createEvent(event, (error, value) => {
@@ -230,13 +242,16 @@ async function sendUBAssignedMails(userEmail, userName, slEmail, slName, ubDetai
         const description = `${ubDetails.type} von ${userName} im Fach ${ubDetails.subject} (Klasse ${ubDetails.grade}).\nFachleiter: ${ubDetails.instructor || 'n.a.'}\nModul: ${ubDetails.module || 'n.a.'}`;
         const location = `Raum ${ubDetails.room}`;
         
-        // WICHTIG: Die E-Mail des Organizers MUSS der SMTP-Senderadresse (transportInfo.from) entsprechen!
-        // Sonst stuft Office 365 (Exchange) dies als Spoofing ein und verwirft die Mail stumm.
+        // Organizer = Portal-Absender
         const organizer = { 
-            name: userName, // Lehrkraft Name als Anzeigename
-            email: transportInfo.from // Portal-Absender als E-Mail-Adresse
+            name: userName, 
+            email: transportInfo.from 
         };
-        icsContent = await generateICS(title, description, location, ubDetails.date_time, organizer);
+        
+        // Attendee = Schulleitungsmitglied (Empfänger der Mail)
+        const attendee = (slEmail && slEmail.trim()) ? { name: slName, email: slEmail } : null;
+        
+        icsContent = await generateICS(title, description, location, ubDetails.date_time, organizer, attendee);
     } catch (err) {
         console.error('[MAIL-ERROR] Fehler beim Generieren der ICS-Datei:', err);
     }
@@ -445,12 +460,12 @@ Dein Unterrichtsbesuchs-Portal`;
             const description = `Dieser Termin wurde abgesagt.`;
             const location = `Raum ${ubDetails.room}`;
             
-            // WICHTIG: Die E-Mail des Organizers MUSS der SMTP-Senderadresse (transportInfo.from) entsprechen!
             const organizer = { 
                 name: userName, 
                 email: transportInfo.from 
             };
-            const icsCancelContent = await generateICS(title, description, location, ubDetails.date_time, organizer);
+            const attendee = { name: slName, email: slEmail };
+            const icsCancelContent = await generateICS(title, description, location, ubDetails.date_time, organizer, attendee);
             cancelIcs = icsCancelContent.replace('METHOD:REQUEST', 'METHOD:CANCEL').replace('STATUS:CONFIRMED', 'STATUS:CANCELLED');
         } catch (icsErr) {
             console.error('[MAIL-ERROR] Fehler bei Stornierungs-ICS-Generierung:', icsErr);
