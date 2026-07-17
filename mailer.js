@@ -41,7 +41,7 @@ async function getTransporter() {
 /**
  * Generiert eine ICS-Datei für ein Event.
  */
-function generateICS(title, description, location, dateStr, organizer, attendee) {
+function generateICS(title, description, location, dateStr, organizer, attendee, uid) {
     return new Promise((resolve, reject) => {
         const dateObj = new Date(dateStr);
         if (isNaN(dateObj.getTime())) {
@@ -57,6 +57,9 @@ function generateICS(title, description, location, dateStr, organizer, attendee)
         ];
 
         const event = {
+            // WICHTIG: Die UID muss für denselben Unterrichtsbesuch bei Zuweisung & Stornierung identisch sein,
+            // damit Outlook/Exchange den Termin im Kalender des Empfängers zuordnen und stornieren kann!
+            uid: uid || `ub-${Date.now()}-${Math.random()}@schule.de`,
             start: start,
             duration: { hours: 1, minutes: 0 }, // Standardmäßig 1 Stunde
             title: title,
@@ -78,7 +81,6 @@ function generateICS(title, description, location, dateStr, organizer, attendee)
         }
 
         // WICHTIG: Exchange liest die Empfänger einer REQUEST-Mail direkt aus den ATTENDEE-Einträgen der ICS!
-        // Fehlen diese, kommt es zum Fehler "550 InvalidRecipientsException: A message can't be sent because it contains no recipients".
         if (attendee && attendee.name && attendee.email && attendee.email.trim()) {
             event.attendees = [
                 {
@@ -226,7 +228,7 @@ async function sendUBAssignedMails(userEmail, userName, slEmail, slName, ubDetai
     const transportInfo = await getTransporter();
     if (!transportInfo) {
         console.log(`[SIMULATION MAIL] An SL: ${slEmail}\nBetreff: Begleitung Unterrichtsbesuch\n---`);
-        console.log(`[SIMULATION MAIL] An Benutzer: ${userEmail}\nBetreff: Begleitung für deinen Unterrichtsbesuch\n---`);
+        console.log(`[SIMULATION MAIL] An Benutzer: ${userEmail}\nBetreff: Begleitung for deinen Unterrichtsbesuch\n---`);
         return;
     }
     
@@ -234,6 +236,10 @@ async function sendUBAssignedMails(userEmail, userName, slEmail, slName, ubDetai
         day: '2-digit', month: '2-digit', year: 'numeric',
         hour: '2-digit', minute: '2-digit'
     });
+
+    // Eindeutige, konsistente UID für diesen Unterrichtsbesuch erzeugen
+    const eventUid = `ub-event-${ubDetails.id}@${transportInfo.from.split('@')[1] || 'ubportal.local'}`;
+    console.log(`[MAIL-DEBUG] Generiere Zuweisungs-iCal mit UID: ${eventUid}`);
 
     // 1. ICS-Datei als interaktive Kalendereinladung erstellen (Method: REQUEST)
     let icsContent = null;
@@ -248,10 +254,10 @@ async function sendUBAssignedMails(userEmail, userName, slEmail, slName, ubDetai
             email: transportInfo.from 
         };
         
-        // Attendee = Schulleitungsmitglied (Empfänger der Mail)
+        // Attendee = Schulleitungsmitglied
         const attendee = (slEmail && slEmail.trim()) ? { name: slName, email: slEmail } : null;
         
-        icsContent = await generateICS(title, description, location, ubDetails.date_time, organizer, attendee);
+        icsContent = await generateICS(title, description, location, ubDetails.date_time, organizer, attendee, eventUid);
     } catch (err) {
         console.error('[MAIL-ERROR] Fehler beim Generieren der ICS-Datei:', err);
     }
@@ -455,6 +461,10 @@ Dein Unterrichtsbesuchs-Portal`;
 
         slHtml = getHtmlTemplate('HINWEIS: Begleitung abgesagt', slName, slHtmlContent, true);
 
+        // Identische UID wie bei der Zuweisung verwenden!
+        const eventUid = `ub-event-${ubDetails.id}@${transportInfo.from.split('@')[1] || 'ubportal.local'}`;
+        console.log(`[MAIL-DEBUG] Generiere Stornierungs-iCal mit UID: ${eventUid}`);
+
         try {
             const title = `ABGESAGT: ${ubDetails.type}: ${ubDetails.subject} - ${userName}`;
             const description = `Dieser Termin wurde abgesagt.`;
@@ -465,7 +475,9 @@ Dein Unterrichtsbesuchs-Portal`;
                 email: transportInfo.from 
             };
             const attendee = { name: slName, email: slEmail };
-            const icsCancelContent = await generateICS(title, description, location, ubDetails.date_time, organizer, attendee);
+            
+            // iCal mit identischer UID wie beim Eintragen erzeugen!
+            const icsCancelContent = await generateICS(title, description, location, ubDetails.date_time, organizer, attendee, eventUid);
             cancelIcs = icsCancelContent.replace('METHOD:REQUEST', 'METHOD:CANCEL').replace('STATUS:CONFIRMED', 'STATUS:CANCELLED');
         } catch (icsErr) {
             console.error('[MAIL-ERROR] Fehler bei Stornierungs-ICS-Generierung:', icsErr);
