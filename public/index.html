@@ -162,6 +162,18 @@
                     </div>
                 </div>
 
+                <!-- Tabs & Suchfeld für Schulleitung -->
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; margin-bottom: 24px;">
+                    <div class="tab-container" style="margin-bottom: 0; border-bottom: none; padding-bottom: 0;">
+                        <button class="tab-btn active" id="tab-sl-active">📅 Zukünftige & Heutige Besuche</button>
+                        <button class="tab-btn" id="tab-sl-archived">🗄️ Das Archiv</button>
+                    </div>
+                    <div style="position: relative; min-width: 280px; max-width: 400px; flex: 1;">
+                        <i data-lucide="search" style="position: absolute; left: 14px; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; color: var(--text-muted); pointer-events: none;"></i>
+                        <input type="text" id="sl-search-input" placeholder="Besuche durchsuchen..." style="width: 100%; padding-left: 42px;">
+                    </div>
+                </div>
+
                 <div class="glass-card table-wrapper">
                     <table class="data-table">
                         <thead>

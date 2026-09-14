@@ -321,7 +321,7 @@ document.getElementById('tab-archived-ub').addEventListener('click', () => {
 
 async function loadTeacherDashboard() {
     try {
-        allMyUbs = await apiFetch('/api/unterrichtsbesuche');
+        allMyUbs = await apiFetch('/api/unterrichtsbesuche?scope=my');
         renderTeacherUbs();
     } catch (err) {
         console.error('Fehler beim Laden des Dashboards:', err);
@@ -333,16 +333,27 @@ function renderTeacherUbs() {
     container.innerHTML = '';
 
     const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
     
     const filteredUbs = allMyUbs.filter(ub => {
         const ubDate = new Date(ub.date_time);
-        const isPast = ubDate < now;
+        const isPast = ubDate < startOfToday;
         const isCancelled = ub.status === 'cancelled';
         
         if (teacherActiveTab === 'active') {
             return !isPast && ub.status !== 'archived' && !isCancelled;
         } else {
             return isPast || ub.status === 'archived' || isCancelled;
+        }
+    });
+
+    filteredUbs.sort((a, b) => {
+        const timeA = new Date(a.date_time).getTime();
+        const timeB = new Date(b.date_time).getTime();
+        if (teacherActiveTab === 'active') {
+            return timeA - timeB; // Nächste Termine zuerst
+        } else {
+            return timeB - timeA; // Im Archiv die jüngsten zuerst
         }
     });
 
@@ -689,10 +700,29 @@ document.getElementById('upload-form').addEventListener('submit', async (e) => {
 // ----------------------------------------------------
 let allSchoolUbs = [];
 let slMembers = [];
+let slActiveTab = 'active'; // 'active' oder 'archived'
+
+document.getElementById('tab-sl-active')?.addEventListener('click', () => {
+    slActiveTab = 'active';
+    document.getElementById('tab-sl-active').classList.add('active');
+    document.getElementById('tab-sl-archived').classList.remove('active');
+    renderSLDashboard();
+});
+
+document.getElementById('tab-sl-archived')?.addEventListener('click', () => {
+    slActiveTab = 'archived';
+    document.getElementById('tab-sl-archived').classList.add('active');
+    document.getElementById('tab-sl-active').classList.remove('active');
+    renderSLDashboard();
+});
+
+document.getElementById('sl-search-input')?.addEventListener('input', () => {
+    renderSLDashboard();
+});
 
 async function loadSLDashboard() {
     try {
-        allSchoolUbs = await apiFetch('/api/unterrichtsbesuche');
+        allSchoolUbs = await apiFetch('/api/unterrichtsbesuche?scope=all');
         slMembers = await apiFetch('/api/schulleitung-users');
         renderSLDashboard();
     } catch (err) {
@@ -705,22 +735,70 @@ function renderSLDashboard() {
     tbody.innerHTML = '';
 
     const now = new Date();
+    // Start des heutigen Tages (00:00:00 Uhr): Vergangene sind alle ab gestern, heute bleibt den ganzen Tag aktiv
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const searchQuery = (document.getElementById('sl-search-input')?.value || '').toLowerCase().trim();
 
-    const visibleUbs = allSchoolUbs.filter(ub => {
-        if (ub.status === 'draft') return false;
-        if (ub.status === 'cancelled') {
-            const ubDate = new Date(ub.date_time);
-            return ubDate >= now;
+    const filteredUbs = allSchoolUbs.filter(ub => {
+        if (ub.status === 'draft') return false; // Entwürfe werden in der Schulleitung nie angezeigt
+
+        const ubDate = new Date(ub.date_time);
+        const isPast = ubDate < startOfToday;
+        const isArchived = ub.status === 'archived' || isPast;
+
+        if (slActiveTab === 'active') {
+            if (isArchived) return false;
+        } else {
+            if (!isArchived) return false;
         }
+
+        if (searchQuery) {
+            const dateFormatted = ubDate.toLocaleString('de-DE', {
+                day: '2-digit', month: '2-digit', year: 'numeric',
+                hour: '2-digit', minute: '2-digit'
+            }).toLowerCase();
+            
+            const searchCorpus = [
+                ub.user_name,
+                ub.user_email,
+                ub.subject,
+                ub.grade,
+                ub.room,
+                ub.type,
+                ub.instructor,
+                ub.module,
+                ub.assigned_sl_name,
+                ub.status === 'cancelled' ? 'abgesagt storniert' : ub.status,
+                dateFormatted
+            ].filter(Boolean).join(' ').toLowerCase();
+
+            return searchCorpus.includes(searchQuery);
+        }
+
         return true;
     });
 
-    if (visibleUbs.length === 0) {
+    // Aufsteigend sortieren für aktive Besuche (die nächsten als erstes), absteigend im Archiv
+    filteredUbs.sort((a, b) => {
+        const timeA = new Date(a.date_time).getTime();
+        const timeB = new Date(b.date_time).getTime();
+        if (slActiveTab === 'active') {
+            return timeA - timeB; // Nächste Termine zuerst
+        } else {
+            return timeB - timeA; // Im Archiv die jüngst vergangenen zuerst
+        }
+    });
+
+    if (filteredUbs.length === 0) {
+        const emptyMsg = searchQuery 
+            ? 'Keine Unterrichtsbesuche passend zu Ihrer Suche gefunden.' 
+            : (slActiveTab === 'active' ? 'Momentan liegen keine anstehenden Unterrichtsbesuche vor.' : 'Das Archiv enthält momentan keine vergangenen Unterrichtsbesuche.');
+            
         tbody.innerHTML = `
             <tr>
                 <td colspan="9" style="text-align: center; color: var(--text-secondary); padding: 40px;">
                     <i data-lucide="inbox" style="width: 48px; height: 48px; margin-bottom: 12px; display: inline-block;"></i>
-                    <p>Momentan liegen keine aktiven Unterrichtsbesuche vor.</p>
+                    <p>${emptyMsg}</p>
                 </td>
             </tr>
         `;
@@ -728,7 +806,7 @@ function renderSLDashboard() {
         return;
     }
 
-    visibleUbs.forEach(ub => {
+    filteredUbs.forEach(ub => {
         const tr = document.createElement('tr');
         
         if (ub.status === 'cancelled') {
@@ -748,10 +826,12 @@ function renderSLDashboard() {
             </a>`;
         }
 
-        // Begleitungs-Auswahl (nur wenn nicht abgesagt)
+        // Begleitungs-Auswahl (nur wenn nicht abgesagt und nicht im Archiv)
         let slDropdown = '';
         if (ub.status === 'cancelled') {
             slDropdown = `<span class="badge status-cancelled">Abgesagt</span>`;
+        } else if (slActiveTab === 'archived') {
+            slDropdown = ub.assigned_sl_name ? `<span>${ub.assigned_sl_name}</span>` : `<span class="text-muted">Keine Begleitung</span>`;
         } else {
             slDropdown = `<select onchange="assignSL(${ub.id}, this.value)" style="width: 100%;">
                 <option value="">-- Nicht zugeordnet --</option>`;
@@ -767,6 +847,8 @@ function renderSLDashboard() {
         let actionsHtml = '';
         if (ub.status === 'cancelled') {
             actionsHtml = `<span style="color: var(--danger); font-weight: 600;">Storniert</span>`;
+        } else if (slActiveTab === 'archived') {
+            actionsHtml = `<span class="text-muted">Abgeschlossen</span>`;
         } else {
             const isAssignedToMe = ub.assigned_schulleitung_id === currentUser.id;
             actionsHtml = isAssignedToMe ? 

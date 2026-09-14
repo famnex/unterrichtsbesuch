@@ -324,11 +324,23 @@ router.get('/api/schulleitung-users', authMiddleware, async (req, res) => {
 // API: Unterrichtsbesuche abrufen
 router.get('/api/unterrichtsbesuche', authMiddleware, async (req, res) => {
     const db = await getDatabase();
+    const scope = req.query.scope; // 'my' für persönliche UBs oder 'all' für Schulübersicht
     let query = '';
     let params = [];
 
-    if (req.user.role === 'schulleitung' || req.user.role === 'admin') {
-        // Schulleitung und Admin sehen alle Unterrichtsbesuche (auch die abgesagten)
+    if (scope === 'my' || (req.user.role !== 'schulleitung' && req.user.role !== 'admin')) {
+        // Persönliches Dashboard: Nur eigene Unterrichtsbesuche der Lehrkraft (auch für Admins/Schulleitung)
+        query = `
+            SELECT ub.*, u.display_name as user_name, u.email as user_email, sl.display_name as assigned_sl_name
+            FROM unterrichtsbesuche ub
+            JOIN users u ON ub.user_id = u.id
+            LEFT JOIN users sl ON ub.assigned_schulleitung_id = sl.id
+            WHERE ub.user_id = ?
+            ORDER BY ub.date_time ASC
+        `;
+        params = [req.user.id];
+    } else {
+        // Schulleitung und Admin sehen alle Unterrichtsbesuche der Schule
         query = `
             SELECT ub.*, u.display_name as user_name, u.email as user_email, sl.display_name as assigned_sl_name
             FROM unterrichtsbesuche ub
@@ -336,16 +348,6 @@ router.get('/api/unterrichtsbesuche', authMiddleware, async (req, res) => {
             LEFT JOIN users sl ON ub.assigned_schulleitung_id = sl.id
             ORDER BY ub.date_time ASC
         `;
-    } else {
-        // Normale Benutzer sehen nur ihre eigenen
-        query = `
-            SELECT ub.*, sl.display_name as assigned_sl_name
-            FROM unterrichtsbesuche ub
-            LEFT JOIN users sl ON ub.assigned_schulleitung_id = sl.id
-            WHERE ub.user_id = ?
-            ORDER BY ub.date_time ASC
-        `;
-        params = [req.user.id];
     }
 
     const ubs = await db.all(query, params);
