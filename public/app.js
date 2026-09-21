@@ -934,18 +934,120 @@ async function deleteUb(id) {
 // ----------------------------------------------------
 // ADMIN DASHBOARD & TABS
 // ----------------------------------------------------
-let activeAdminTab = 'users'; // 'users', 'settings', 'update'
+let activeAdminTab = 'users'; // 'users', 'settings', 'templates', 'update'
+let adminTemplatesList = [];
 
 function initAdminEvents() {
     const tabUsers = document.getElementById('tab-admin-users');
     const tabSettings = document.getElementById('tab-admin-settings');
+    const tabTemplates = document.getElementById('tab-admin-templates');
     const tabUpdate = document.getElementById('tab-admin-update');
     
-    if (tabUsers && tabSettings && tabUpdate) {
-        tabUsers.addEventListener('click', () => switchAdminTab('users'));
-        tabSettings.addEventListener('click', () => switchAdminTab('settings'));
-        tabUpdate.addEventListener('click', () => switchAdminTab('update'));
+    if (tabUsers) tabUsers.addEventListener('click', () => switchAdminTab('users'));
+    if (tabSettings) tabSettings.addEventListener('click', () => switchAdminTab('settings'));
+    if (tabTemplates) tabTemplates.addEventListener('click', () => switchAdminTab('templates'));
+    if (tabUpdate) tabUpdate.addEventListener('click', () => switchAdminTab('update'));
+
+    // Test-E-Mail Button
+    const btnTestMail = document.getElementById('btn-send-test-mail');
+    if (btnTestMail) {
+        btnTestMail.addEventListener('click', sendAdminTestMail);
     }
+
+    // Template Selector
+    const templateSelect = document.getElementById('admin-template-select');
+    if (templateSelect) {
+        templateSelect.addEventListener('change', (e) => selectAdminTemplate(e.target.value));
+    }
+
+    // Template Subject & Body Input / Live Preview Event
+    const templateSubject = document.getElementById('admin-template-subject');
+    const templateBody = document.getElementById('admin-template-body');
+    if (templateSubject) templateSubject.addEventListener('input', renderTemplatePreview);
+    if (templateBody) templateBody.addEventListener('input', renderTemplatePreview);
+
+    // Template Form Submit
+    const templateForm = document.getElementById('admin-template-form');
+    if (templateForm) {
+        templateForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const currentTemplateId = document.getElementById('admin-template-select').value;
+            const subject = document.getElementById('admin-template-subject').value;
+            const body_html = document.getElementById('admin-template-body').value;
+
+            try {
+                const updated = await apiFetch(`/api/mail-templates/${currentTemplateId}`, {
+                    method: 'PUT',
+                    body: { subject, body_html }
+                });
+                
+                // Cache in Liste aktualisieren
+                const idx = adminTemplatesList.findIndex(t => t.id === currentTemplateId);
+                if (idx !== -1) {
+                    adminTemplatesList[idx] = updated;
+                }
+                
+                alert('E-Mail-Vorlage erfolgreich gespeichert!');
+                renderTemplatePreview();
+            } catch (err) {
+                alert('Fehler beim Speichern der Vorlage: ' + err.message);
+            }
+        });
+    }
+
+    // Template Reset Button
+    const btnResetTemplate = document.getElementById('btn-reset-template');
+    if (btnResetTemplate) {
+        btnResetTemplate.addEventListener('click', async () => {
+            const currentTemplateId = document.getElementById('admin-template-select').value;
+            if (!confirm('Möchten Sie diese E-Mail-Vorlage wirklich auf den Standardtext zurücksetzen?')) return;
+
+            try {
+                const reset = await apiFetch(`/api/mail-templates/${currentTemplateId}/reset`, {
+                    method: 'POST'
+                });
+
+                const idx = adminTemplatesList.findIndex(t => t.id === currentTemplateId);
+                if (idx !== -1) {
+                    adminTemplatesList[idx] = reset;
+                }
+
+                selectAdminTemplate(currentTemplateId);
+                alert('Vorlage erfolgreich auf Standard zurückgesetzt.');
+            } catch (err) {
+                alert('Fehler beim Zurücksetzen: ' + err.message);
+            }
+        });
+    }
+
+    // Toggle Preview Button
+    const btnTogglePreview = document.getElementById('btn-toggle-preview');
+    if (btnTogglePreview) {
+        btnTogglePreview.addEventListener('click', () => {
+            const previewBox = document.getElementById('template-preview-box');
+            if (previewBox) {
+                previewBox.classList.toggle('hidden');
+                renderTemplatePreview();
+            }
+        });
+    }
+
+    // Placeholder Pills Click to Insert
+    document.querySelectorAll('.placeholder-pill').forEach(pill => {
+        pill.addEventListener('click', () => {
+            const placeholder = pill.getAttribute('data-placeholder');
+            const textarea = document.getElementById('admin-template-body');
+            if (!textarea) return;
+
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            const text = textarea.value;
+            textarea.value = text.substring(0, start) + placeholder + text.substring(end);
+            textarea.selectionStart = textarea.selectionEnd = start + placeholder.length;
+            textarea.focus();
+            renderTemplatePreview();
+        });
+    });
 
     // Update-Button Listener
     const btnUpdate = document.getElementById('btn-run-update');
@@ -989,13 +1091,19 @@ function switchAdminTab(tabName) {
     // Buttons toggeln
     document.getElementById('tab-admin-users').classList.toggle('active', tabName === 'users');
     document.getElementById('tab-admin-settings').classList.toggle('active', tabName === 'settings');
+    document.getElementById('tab-admin-templates').classList.toggle('active', tabName === 'templates');
     document.getElementById('tab-admin-update').classList.toggle('active', tabName === 'update');
 
     // Panels toggeln
     document.getElementById('panel-admin-users').classList.toggle('hidden', tabName !== 'users');
     document.getElementById('panel-admin-settings').classList.toggle('hidden', tabName !== 'settings');
+    document.getElementById('panel-admin-templates').classList.toggle('hidden', tabName !== 'templates');
     document.getElementById('panel-admin-update').classList.toggle('hidden', tabName !== 'update');
     
+    if (tabName === 'templates') {
+        loadAdminTemplates();
+    }
+
     lucide.createIcons();
 }
 
@@ -1014,9 +1122,20 @@ async function loadAdminDashboard() {
         document.getElementById('admin-jwt-secret').value = ''; // Secret wird nicht angezeigt
         document.getElementById('admin-logout-url').value = settings.logout_redirect_url || '';
 
+        // Test-E-Mail Empfänger vorbelegen mit eigener E-Mail
+        if (currentUser && currentUser.email) {
+            const testMailInput = document.getElementById('admin-test-email');
+            if (testMailInput && !testMailInput.value) {
+                testMailInput.value = currentUser.email;
+            }
+        }
+
         // Benutzerliste laden
         adminUsersList = await apiFetch('/api/users');
         renderAdminUsers(adminUsersList);
+
+        // Vorlagen laden
+        await loadAdminTemplates();
 
         // Update Log-Feld zurücksetzen
         document.getElementById('update-log-container').classList.add('hidden');
@@ -1030,6 +1149,134 @@ async function loadAdminDashboard() {
         lucide.createIcons();
     } catch (err) {
         console.error('Fehler beim Laden des Admin-Dashboards:', err);
+    }
+}
+
+// Lädt alle E-Mail-Vorlagen vom Server und befüllt das Dropdown
+async function loadAdminTemplates() {
+    try {
+        adminTemplatesList = await apiFetch('/api/mail-templates');
+        const select = document.getElementById('admin-template-select');
+        if (!select || adminTemplatesList.length === 0) return;
+
+        const currentSelectedId = select.value || adminTemplatesList[0].id;
+        select.innerHTML = '';
+
+        adminTemplatesList.forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t.id;
+            opt.textContent = t.title || t.id;
+            if (t.id === currentSelectedId) {
+                opt.selected = true;
+            }
+            select.appendChild(opt);
+        });
+
+        selectAdminTemplate(currentSelectedId);
+    } catch (err) {
+        console.error('Fehler beim Laden der Vorlagen:', err);
+    }
+}
+
+function selectAdminTemplate(templateId) {
+    const template = adminTemplatesList.find(t => t.id === templateId);
+    if (!template) return;
+
+    document.getElementById('admin-template-subject').value = template.subject || '';
+    document.getElementById('admin-template-body').value = template.body_html || '';
+    document.getElementById('template-desc-text').textContent = template.description || 'Automatische System-Benachrichtigung.';
+
+    renderTemplatePreview();
+}
+
+function renderTemplatePreview() {
+    const subjectVal = document.getElementById('admin-template-subject')?.value || '';
+    const bodyVal = document.getElementById('admin-template-body')?.value || '';
+    const previewContent = document.getElementById('template-preview-content');
+
+    if (!previewContent) return;
+
+    const sampleVars = {
+        user_name: 'Max Mustermann (Lehrkraft)',
+        user_email: 'max.mustermann@schule.de',
+        recipient_name: currentUser?.display_name || 'Dr. Stefan Schulleitung',
+        recipient_email: currentUser?.email || 'schulleitung@schule.de',
+        subject: 'Mathematik',
+        grade: '10b',
+        room: 'Raum 204',
+        type: 'Unterrichtsbesuch',
+        instructor: 'Frau Dr. Studienleiterin',
+        module: 'Fachdidaktik Modul 2',
+        date_time: 'Dienstag, 22.09.2026, 09:45',
+        sl_name: 'StD Stefan Schulleiter',
+        sl_email: 's.schulleiter@schule.de'
+    };
+
+    let previewSubject = subjectVal;
+    let previewBody = bodyVal;
+
+    for (const [k, v] of Object.entries(sampleVars)) {
+        const regex = new RegExp(`\\{${k}\\}`, 'g');
+        previewSubject = previewSubject.replace(regex, v);
+        previewBody = previewBody.replace(regex, v);
+    }
+
+    const htmlWrapper = `
+        <div style="border: 1px solid #e2e8f0; border-radius: 6px; padding: 20px; background: #ffffff; color: #1e293b; font-family: 'Segoe UI', Tahoma, sans-serif;">
+            <div style="border-bottom: 1px solid #e2e8f0; padding-bottom: 12px; margin-bottom: 16px;">
+                <span style="font-weight: 600; color: #64748b; font-size: 0.85rem; text-transform: uppercase;">Betreffzeile:</span><br>
+                <span style="color: #4338ca; font-weight: 700; font-size: 1.05rem;">${previewSubject}</span>
+            </div>
+            <div style="background: #ffffff; color: #334155; line-height: 1.6;">
+                ${previewBody}
+            </div>
+        </div>
+    `;
+
+    previewContent.innerHTML = htmlWrapper;
+}
+
+// Test-E-Mail senden
+async function sendAdminTestMail() {
+    const emailInput = document.getElementById('admin-test-email');
+    const statusBox = document.getElementById('test-mail-status');
+    const btn = document.getElementById('btn-send-test-mail');
+
+    const targetEmail = (emailInput?.value || '').trim() || currentUser?.email;
+    if (!targetEmail) {
+        alert('Bitte geben Sie eine Empfänger-E-Mail-Adresse für den Test ein.');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = '<i data-lucide="loader"></i> Sende...';
+    lucide.createIcons();
+
+    statusBox.classList.remove('hidden');
+    statusBox.style.background = 'hsla(222, 30%, 15%, 0.7)';
+    statusBox.style.color = 'var(--text-secondary)';
+    statusBox.style.border = '1px solid var(--border-card)';
+    statusBox.textContent = `Sende Test-E-Mail an ${targetEmail}...`;
+
+    try {
+        const res = await apiFetch('/api/settings/test-mail', {
+            method: 'POST',
+            body: { to: targetEmail }
+        });
+
+        statusBox.style.background = 'hsla(150, 80%, 40%, 0.15)';
+        statusBox.style.color = '#10b981';
+        statusBox.style.border = '1px solid #10b981';
+        statusBox.innerHTML = `<strong>✅ Erfolgreich:</strong> ${res.message}`;
+    } catch (err) {
+        statusBox.style.background = 'hsla(0, 80%, 50%, 0.15)';
+        statusBox.style.color = '#ef4444';
+        statusBox.style.border = '1px solid #ef4444';
+        statusBox.innerHTML = `<strong>❌ Fehler:</strong> ${err.message}`;
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="send"></i> Test-E-Mail senden';
+        lucide.createIcons();
     }
 }
 

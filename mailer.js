@@ -1,6 +1,6 @@
 const nodemailer = require('nodemailer');
 const ics = require('ics');
-const { getDatabase } = require('./db');
+const { getDatabase, DEFAULT_TEMPLATES } = require('./db');
 
 /**
  * Erstellt einen Transporter basierend auf den aktuellen Einstellungen in der Datenbank.
@@ -14,12 +14,12 @@ async function getTransporter() {
         return null;
     }
 
-    console.log(`[MAIL-DEBUG] SMTP-Konfiguration gefunden: Host=${settings.smtp_host}, Port=${settings.smtp_port}, User=${settings.smtp_user}, Sender=${settings.smtp_from}`);
+    console.log(`[MAIL-DEBUG] SMTP-Konfiguration: Host=${settings.smtp_host}, Port=${settings.smtp_port}, User=${settings.smtp_user}, Sender=${settings.smtp_from}`);
 
     const config = {
         host: settings.smtp_host,
-        port: settings.smtp_port,
-        secure: settings.smtp_port === 465, // True für 465, False für andere
+        port: parseInt(settings.smtp_port, 10),
+        secure: parseInt(settings.smtp_port, 10) === 465, // True für 465, False für andere (z.B. 587 STARTTLS)
         auth: {
             user: settings.smtp_user,
             pass: settings.smtp_pass
@@ -36,6 +36,97 @@ async function getTransporter() {
         console.error('[MAIL-ERROR] Fehler beim Erstellen des Nodemailer-Transporters:', err);
         return null;
     }
+}
+
+/**
+ * Hilfsfunktion: Lädt eine E-Mail-Vorlage und ersetzt alle Platzhalter.
+ */
+async function renderTemplate(templateId, variables = {}) {
+    const db = await getDatabase();
+    let template = await db.get('SELECT * FROM mail_templates WHERE id = ?', [templateId]);
+
+    if (!template) {
+        template = DEFAULT_TEMPLATES.find(t => t.id === templateId) || {
+            subject: 'Benachrichtigung Unterrichtsbesuch',
+            body_html: '<p>Benachrichtigung zum Unterrichtsbesuch.</p>'
+        };
+    }
+
+    let subject = template.subject || '';
+    let bodyHtml = template.body_html || '';
+
+    // Platzhalter ersetzen
+    for (const [key, value] of Object.entries(variables)) {
+        const valStr = (value !== null && value !== undefined) ? String(value) : '';
+        const regex = new RegExp(`\\{${key}\\}`, 'g');
+        subject = subject.replace(regex, valStr);
+        bodyHtml = bodyHtml.replace(regex, valStr);
+    }
+
+    // HTML-Tags für reinen Textfilter entfernen
+    const plainText = bodyHtml
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+        .replace(/<div class="details-row"><div class="details-label">([^<]+)<\/div><div class="details-value">([^<]+)<\/div><\/div>/gi, '$1 $2\n')
+        .replace(/<br\s*[\/]?>/gi, '\n')
+        .replace(/<\/p>/gi, '\n\n')
+        .replace(/<\/div>/gi, '\n')
+        .replace(/<[^>]+>/gi, '')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .trim();
+
+    const fullHtml = getHtmlWrapper(subject, bodyHtml, templateId.includes('cancel') || templateId.includes('reminder'));
+
+    return {
+        subject,
+        bodyHtml,
+        fullHtml,
+        plainText
+    };
+}
+
+/**
+ * HTML-Container-Layout für alle E-Mails.
+ */
+function getHtmlWrapper(title, contentHtml, isWarning = false) {
+    const headerBg = isWarning ? '#dc2626' : '#5850ec';
+    return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f5f7; color: #2d3748; margin: 0; padding: 0; }
+            .container { max-width: 600px; margin: 40px auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); overflow: hidden; }
+            .header { background-color: ${headerBg}; padding: 24px; text-align: center; color: #ffffff; }
+            .header h1 { margin: 0; font-size: 20px; font-weight: 600; }
+            .content { padding: 32px; line-height: 1.6; }
+            .content p { margin: 0 0 16px 0; }
+            .details-box { background-color: #f8fafc; border-left: 4px solid ${headerBg}; border-radius: 4px; padding: 18px; margin: 20px 0; }
+            .details-row { display: flex; margin-bottom: 8px; font-size: 14px; }
+            .details-row:last-child { margin-bottom: 0; }
+            .details-label { width: 130px; font-weight: 600; color: #64748b; }
+            .details-value { flex: 1; color: #1e293b; }
+            .footer { background-color: #f1f5f9; padding: 16px; text-align: center; font-size: 12px; color: #64748b; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>${title}</h1>
+            </div>
+            <div class="content">
+                ${contentHtml}
+            </div>
+            <div class="footer">
+                Dies ist eine automatisch generierte E-Mail des Unterrichtsbesuchs-Portals.
+            </div>
+        </div>
+    </body>
+    </html>
+    `;
 }
 
 /**
@@ -57,30 +148,24 @@ function generateICS(title, description, location, dateStr, organizer, attendee,
         ];
 
         const event = {
-            // WICHTIG: Die UID muss für denselben Unterrichtsbesuch bei Zuweisung & Stornierung identisch sein,
-            // damit Outlook/Exchange den Termin im Kalender des Empfängers zuordnen und stornieren kann!
             uid: uid || `ub-${Date.now()}-${Math.random()}@schule.de`,
             start: start,
-            duration: { hours: 1, minutes: 0 }, // Standardmäßig 1 Stunde
+            duration: { hours: 1, minutes: 0 },
             title: title,
             description: description,
             location: location,
             status: 'CONFIRMED',
             busyStatus: 'BUSY',
-            method: 'REQUEST' // Macht die ICS zur interaktiven Kalendereinladung (für Outlook/Gmail)
+            method: 'REQUEST'
         };
 
-        // WICHTIG: Für Outlook/Exchange ist bei einer REQUEST-Methode ein Organisator Pflicht.
-        // Die E-Mail-Adresse des Organizers MUSS der SMTP-Senderadresse (from) entsprechen!
         if (organizer && organizer.name && organizer.email && organizer.email.trim()) {
             event.organizer = {
                 name: organizer.name,
                 email: organizer.email.trim()
             };
-            console.log(`[MAIL-DEBUG] ICS Event-Organizer gesetzt: ${organizer.name} <${organizer.email.trim()}>`);
         }
 
-        // WICHTIG: Exchange liest die Empfänger einer REQUEST-Mail direkt aus den ATTENDEE-Einträgen der ICS!
         if (attendee && attendee.name && attendee.email && attendee.email.trim()) {
             event.attendees = [
                 {
@@ -91,7 +176,6 @@ function generateICS(title, description, location, dateStr, organizer, attendee,
                     partstat: 'NEEDS-ACTION'
                 }
             ];
-            console.log(`[MAIL-DEBUG] ICS Event-Attendee (Teilnehmer) gesetzt: ${attendee.name} <${attendee.email.trim()}>`);
         }
 
         ics.createEvent(event, (error, value) => {
@@ -103,275 +187,341 @@ function generateICS(title, description, location, dateStr, organizer, attendee,
     });
 }
 
-/**
- * Hilfsfunktion zur Generierung eines einheitlichen HTML-E-Mail-Templates.
- */
-function getHtmlTemplate(title, recipientName, contentHtml, isWarning = false) {
-    const headerBg = isWarning ? '#e53e3e' : '#5850ec'; // Rot für Absagen, Blau für Standard
-    return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <style>
-            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f5f7; color: #2d3748; margin: 0; padding: 0; }
-            .container { max-width: 600px; margin: 40px auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); overflow: hidden; }
-            .header { background-color: ${headerBg}; padding: 24px; text-align: center; color: #ffffff; }
-            .header h1 { margin: 0; font-size: 22px; font-weight: 600; }
-            .content { padding: 32px; line-height: 1.6; }
-            .content p { margin: 0 0 16px 0; }
-            .details-box { background-color: #f7fafc; border-left: 4px solid ${headerBg}; border-radius: 4px; padding: 20px; margin: 24px 0; }
-            .details-row { display: flex; margin-bottom: 8px; font-size: 14px; }
-            .details-row:last-child { margin-bottom: 0; }
-            .details-label { width: 120px; font-weight: 600; color: #718096; }
-            .details-value { flex: 1; color: #2d3748; }
-            .footer { background-color: #edf2f7; padding: 16px; text-align: center; font-size: 12px; color: #718096; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1>${title}</h1>
-            </div>
-            <div class="content">
-                <p>Hallo <strong>${recipientName}</strong>,</p>
-                ${contentHtml}
-            </div>
-            <div class="footer">
-                Dies ist eine automatisch generierte E-Mail des Unterrichtsbesuchs-Portals.
-            </div>
-        </div>
-    </body>
-    </html>
-    `;
-}
-
-/**
- * Sendet eine E-Mail an den Benutzer, dass der UB erfolgreich eingereicht wurde.
- */
-async function sendUBSubmittedMail(userEmail, userName, ubDetails) {
-    console.log(`[MAIL-DEBUG] sendUBSubmittedMail aufgerufen: An="${userEmail}", Name="${userName}", UB-ID=${ubDetails.id}`);
-
-    if (!userEmail || !userEmail.trim()) {
-        console.warn(`[MAIL-WARN] E-Mail zum eingereichten UB abgebrochen: Empfänger-E-Mail fehlt für Benutzer "${userName}"`);
-        return;
-    }
-
-    const transportInfo = await getTransporter();
-    const subject = `Unterrichtsbesuch eingereicht: ${ubDetails.subject} (${ubDetails.grade})`;
-    
-    const dateFormatted = new Date(ubDetails.date_time).toLocaleString('de-DE', {
+function formatDate(dateStr) {
+    return new Date(dateStr).toLocaleString('de-DE', {
         day: '2-digit', month: '2-digit', year: 'numeric',
         hour: '2-digit', minute: '2-digit'
     });
+}
 
-    const text = `Hallo ${userName},
-
-Dein Unterrichtsbesuch am ${dateFormatted} im Fach ${ubDetails.subject} (Klasse ${ubDetails.grade}) wurde erfolgreich im System eingereicht.
-
-Details zum Termin:
-- Raum: ${ubDetails.room}
-- Art: ${ubDetails.type}
-- Fachleiter: ${ubDetails.instructor || 'Nicht angegeben'}
-- Modul: ${ubDetails.module || 'Nicht angegeben'}
-
-Sobald ein Mitglied der Schulleitung den Termin übernimmt, wirst du benachrichtigt.
-
-Freundliche Grüße,
-Dein Unterrichtsbesuchs-Portal`;
-
-    const htmlContent = `
-        <p>Dein Unterrichtsbesuch wurde erfolgreich im System eingereicht.</p>
-        <div class="details-box">
-            <div class="details-row"><div class="details-label">Termin:</div><div class="details-value">${dateFormatted} Uhr</div></div>
-            <div class="details-row"><div class="details-label">Fach:</div><div class="details-value">${ubDetails.subject}</div></div>
-            <div class="details-row"><div class="details-label">Klasse:</div><div class="details-value">${ubDetails.grade}</div></div>
-            <div class="details-row"><div class="details-label">Raum:</div><div class="details-value">${ubDetails.room}</div></div>
-            <div class="details-row"><div class="details-label">Art:</div><div class="details-value">${ubDetails.type}</div></div>
-            <div class="details-row"><div class="details-label">Fachleiter:</div><div class="details-value">${ubDetails.instructor || 'Nicht angegeben'}</div></div>
-            <div class="details-row"><div class="details-label">Modul:</div><div class="details-value">${ubDetails.module || 'Nicht angegeben'}</div></div>
-        </div>
-        <p>Sobald ein Mitglied der Schulleitung den Termin übernimmt, wirst du benachrichtigt.</p>
-        <p>Freundliche Grüße,<br>Dein Unterrichtsbesuchs-Portal</p>
-    `;
-
-    const html = getHtmlTemplate('Unterrichtsbesuch eingereicht', userName, htmlContent);
-
-    if (!transportInfo) {
-        console.log(`[SIMULATION MAIL] An: ${userEmail}\nBetreff: ${subject}\nHTML-Länge: ${html.length}\n---`);
-        return;
+/**
+ * Sendet eine Test-E-Mail mit den aktuellen SMTP-Einstellungen.
+ */
+async function sendTestMail(toEmail) {
+    if (!toEmail || !toEmail.trim()) {
+        throw new Error('Empfänger-E-Mail-Adresse fehlt.');
     }
 
+    const transportInfo = await getTransporter();
+    if (!transportInfo) {
+        throw new Error('SMTP ist nicht konfiguriert. Bitte überprüfen Sie die SMTP-Einstellungen.');
+    }
+
+    const subject = 'Test-E-Mail: Unterrichtsbesuchs-Portal';
+    const htmlContent = `
+        <p>Hallo,</p>
+        <p>dies ist eine <strong>erfolgreiche Test-E-Mail</strong> aus Ihrem Unterrichtsbesuchs-Portal.</p>
+        <div class="details-box">
+            <div class="details-row"><div class="details-label">Zeitpunkt:</div><div class="details-value">${new Date().toLocaleString('de-DE')}</div></div>
+            <div class="details-row"><div class="details-label">Absender:</div><div class="details-value">${transportInfo.from}</div></div>
+            <div class="details-row"><div class="details-label">Empfänger:</div><div class="details-value">${toEmail}</div></div>
+        </div>
+        <p>Ihr E-Mail-Versand ist optimal eingerichtet und funktionsfähig!</p>
+    `;
+    const fullHtml = getHtmlWrapper('Test-E-Mail erfolgreich', htmlContent);
+
+    console.log(`[MAIL-TEST] Sende Test-E-Mail an ${toEmail}...`);
+    await transportInfo.transporter.sendMail({
+        from: transportInfo.from,
+        to: toEmail,
+        subject: subject,
+        text: 'Test-E-Mail aus dem Unterrichtsbesuchs-Portal: Ihr E-Mail-Versand ist betriebsbereit.',
+        html: fullHtml
+    });
+    console.log(`[MAIL-SUCCESS] Test-E-Mail erfolgreich an ${toEmail} gesendet.`);
+    return true;
+}
+
+/**
+ * a & b: Sendet E-Mails bei Einreichung eines UBs:
+ * a. An alle Schulleitungsmitglieder
+ * b. An die Lehrkraft (LiV) mit Hinweis auf Upload-Frist (1 Tag vorher)
+ */
+async function sendUBSubmittedMail(userEmail, userName, ubDetails) {
+    console.log(`[MAIL-DEBUG] sendUBSubmittedMail: LiV="${userName}" <${userEmail}>, UB-ID=${ubDetails.id}`);
+    const transportInfo = await getTransporter();
+    const dateFormatted = formatDate(ubDetails.date_time);
+
+    const baseVariables = {
+        user_name: userName,
+        user_email: userEmail,
+        subject: ubDetails.subject,
+        grade: ubDetails.grade,
+        room: ubDetails.room,
+        type: ubDetails.type,
+        instructor: ubDetails.instructor || 'Nicht angegeben',
+        module: ubDetails.module || 'Nicht angegeben',
+        date_time: dateFormatted
+    };
+
+    // b. Bestätigung an die Lehrkraft (LiV)
+    if (userEmail && userEmail.trim()) {
+        try {
+            const renderedLiv = await renderTemplate('ub_created_liv', {
+                ...baseVariables,
+                recipient_name: userName,
+                recipient_email: userEmail
+            });
+
+            if (transportInfo) {
+                await transportInfo.transporter.sendMail({
+                    from: transportInfo.from,
+                    to: userEmail,
+                    subject: renderedLiv.subject,
+                    text: renderedLiv.plainText,
+                    html: renderedLiv.fullHtml
+                });
+                console.log(`[MAIL-SUCCESS] Einreichungsbestätigung (b) an LiV (${userEmail}) gesendet.`);
+            } else {
+                console.log(`[SIMULATION MAIL] An LiV: ${userEmail}\nBetreff: ${renderedLiv.subject}`);
+            }
+        } catch (err) {
+            console.error('[MAIL-ERROR] Fehler beim Senden an LiV:', err);
+        }
+    }
+
+    // a. Benachrichtigung an alle Schulleitungsmitglieder
     try {
+        const db = await getDatabase();
+        const slUsers = await db.all("SELECT display_name, email FROM users WHERE (role = 'schulleitung' OR role = 'admin') AND email IS NOT NULL AND email != ''");
+        
+        console.log(`[MAIL-DEBUG] Gefundene SL-Mitglieder für Benachrichtigung (a): ${slUsers.length}`);
+
+        for (const sl of slUsers) {
+            const renderedSl = await renderTemplate('ub_created_sl', {
+                ...baseVariables,
+                recipient_name: sl.display_name || 'Schulleitungsmitglied',
+                recipient_email: sl.email
+            });
+
+            if (transportInfo) {
+                await transportInfo.transporter.sendMail({
+                    from: transportInfo.from,
+                    to: sl.email,
+                    subject: renderedSl.subject,
+                    text: renderedSl.plainText,
+                    html: renderedSl.fullHtml
+                });
+                console.log(`[MAIL-SUCCESS] Benachrichtigung über neuen UB (a) an SL (${sl.email}) gesendet.`);
+            } else {
+                console.log(`[SIMULATION MAIL] An SL: ${sl.email}\nBetreff: ${renderedSl.subject}`);
+            }
+        }
+    } catch (err) {
+        console.error('[MAIL-ERROR] Fehler beim Senden an SL-Mitglieder:', err);
+    }
+}
+
+/**
+ * c. Erinnerung an LiV, wenn am Vortag (9:00 Uhr) kein Entwurf hochgeladen wurde.
+ */
+async function sendDraftReminderMail(userEmail, userName, ubDetails) {
+    if (!userEmail || !userEmail.trim()) return;
+    const transportInfo = await getTransporter();
+    const dateFormatted = formatDate(ubDetails.date_time);
+
+    const rendered = await renderTemplate('reminder_draft_liv', {
+        user_name: userName,
+        user_email: userEmail,
+        recipient_name: userName,
+        recipient_email: userEmail,
+        subject: ubDetails.subject,
+        grade: ubDetails.grade,
+        room: ubDetails.room,
+        type: ubDetails.type,
+        instructor: ubDetails.instructor || 'Nicht angegeben',
+        module: ubDetails.module || 'Nicht angegeben',
+        date_time: dateFormatted
+    });
+
+    if (transportInfo) {
         await transportInfo.transporter.sendMail({
             from: transportInfo.from,
             to: userEmail,
-            subject: subject,
-            text: text,
-            html: html
+            subject: rendered.subject,
+            text: rendered.plainText,
+            html: rendered.fullHtml
         });
-        console.log(`[MAIL-SUCCESS] E-Mail "UB eingereicht" erfolgreich an ${userEmail} gesendet.`);
-    } catch (err) {
-        console.error('[MAIL-ERROR] Fehler beim Senden der "UB eingereicht" E-Mail:', err);
+        console.log(`[MAIL-SUCCESS] Erinnerung fehlender Entwurf (c) an LiV (${userEmail}) gesendet.`);
+    } else {
+        console.log(`[SIMULATION MAIL] Erinnerung Entwurf an LiV (${userEmail})`);
     }
 }
 
 /**
- * Sendet E-Mails bei Übernahme/Zuweisung durch ein Schulleitungsmitglied.
+ * d. Erinnerung an alle SL-Mitglieder, wenn der UB am Vortag (9:00 Uhr) noch nicht zugewiesen wurde.
  */
-async function sendUBAssignedMails(userEmail, userName, slEmail, slName, ubDetails) {
-    console.log(`[MAIL-DEBUG] sendUBAssignedMails aufgerufen:
-    - Lehrkraft: "${userName}" <${userEmail}>
-    - Schulleitung: "${slName}" <${slEmail}>
-    - UB-ID: ${ubDetails.id}, Fach: ${ubDetails.subject}`);
-
+async function sendUnassignedSLReminderMail(userName, userEmail, ubDetails) {
     const transportInfo = await getTransporter();
-    if (!transportInfo) {
-        console.log(`[SIMULATION MAIL] An SL: ${slEmail}\nBetreff: Begleitung Unterrichtsbesuch\n---`);
-        console.log(`[SIMULATION MAIL] An Benutzer: ${userEmail}\nBetreff: Begleitung for deinen Unterrichtsbesuch\n---`);
-        return;
+    const db = await getDatabase();
+    const slUsers = await db.all("SELECT display_name, email FROM users WHERE (role = 'schulleitung' OR role = 'admin') AND email IS NOT NULL AND email != ''");
+    const dateFormatted = formatDate(ubDetails.date_time);
+
+    console.log(`[MAIL-DEBUG] Sende Erinnerung nicht zugewiesener UB (d) an ${slUsers.length} SL-Mitglieder...`);
+
+    for (const sl of slUsers) {
+        const rendered = await renderTemplate('reminder_unassigned_sl', {
+            user_name: userName,
+            user_email: userEmail,
+            recipient_name: sl.display_name || 'Schulleitungsmitglied',
+            recipient_email: sl.email,
+            subject: ubDetails.subject,
+            grade: ubDetails.grade,
+            room: ubDetails.room,
+            type: ubDetails.type,
+            instructor: ubDetails.instructor || 'Nicht angegeben',
+            module: ubDetails.module || 'Nicht angegeben',
+            date_time: dateFormatted
+        });
+
+        if (transportInfo) {
+            await transportInfo.transporter.sendMail({
+                from: transportInfo.from,
+                to: sl.email,
+                subject: rendered.subject,
+                text: rendered.plainText,
+                html: rendered.fullHtml
+            });
+            console.log(`[MAIL-SUCCESS] Erinnerung nicht zugewiesen (d) an SL (${sl.email}) gesendet.`);
+        } else {
+            console.log(`[SIMULATION MAIL] Nicht zugewiesen (d) an SL (${sl.email})`);
+        }
     }
-    
-    const dateFormatted = new Date(ubDetails.date_time).toLocaleString('de-DE', {
-        day: '2-digit', month: '2-digit', year: 'numeric',
-        hour: '2-digit', minute: '2-digit'
+}
+
+/**
+ * e. Terminerinnerung an zugewiesenes SL-Mitglied am Vortag (10:00 Uhr).
+ */
+async function sendUpcomingSLReminderMail(slEmail, slName, userName, userEmail, ubDetails) {
+    if (!slEmail || !slEmail.trim()) return;
+    const transportInfo = await getTransporter();
+    const dateFormatted = formatDate(ubDetails.date_time);
+
+    const rendered = await renderTemplate('reminder_upcoming_sl', {
+        user_name: userName,
+        user_email: userEmail,
+        recipient_name: slName,
+        recipient_email: slEmail,
+        subject: ubDetails.subject,
+        grade: ubDetails.grade,
+        room: ubDetails.room,
+        type: ubDetails.type,
+        instructor: ubDetails.instructor || 'Nicht angegeben',
+        module: ubDetails.module || 'Nicht angegeben',
+        date_time: dateFormatted
     });
 
-    // Eindeutige, konsistente UID für diesen Unterrichtsbesuch erzeugen
-    const eventUid = `ub-event-${ubDetails.id}@${transportInfo.from.split('@')[1] || 'ubportal.local'}`;
-    console.log(`[MAIL-DEBUG] Generiere Zuweisungs-iCal mit UID: ${eventUid}`);
+    if (transportInfo) {
+        await transportInfo.transporter.sendMail({
+            from: transportInfo.from,
+            to: slEmail,
+            subject: rendered.subject,
+            text: rendered.plainText,
+            html: rendered.fullHtml
+        });
+        console.log(`[MAIL-SUCCESS] Terminerinnerung (e) an zugewiesenes SL-Mitglied (${slEmail}) gesendet.`);
+    } else {
+        console.log(`[SIMULATION MAIL] Terminerinnerung (e) an SL (${slEmail})`);
+    }
+}
 
-    // 1. ICS-Datei als interaktive Kalendereinladung erstellen (Method: REQUEST)
+/**
+ * Sendet E-Mails bei Zuweisung eines Unterrichtsbesuchs.
+ */
+async function sendUBAssignedMails(userEmail, userName, slEmail, slName, ubDetails) {
+    const transportInfo = await getTransporter();
+    const dateFormatted = formatDate(ubDetails.date_time);
+    const eventUid = `ub-event-${ubDetails.id}@${(transportInfo ? transportInfo.from.split('@')[1] : 'ubportal.local') || 'ubportal.local'}`;
+
     let icsContent = null;
     try {
         const title = `${ubDetails.type}: ${ubDetails.subject} - ${userName}`;
         const description = `${ubDetails.type} von ${userName} im Fach ${ubDetails.subject} (Klasse ${ubDetails.grade}).\nFachleiter: ${ubDetails.instructor || 'n.a.'}\nModul: ${ubDetails.module || 'n.a.'}`;
         const location = `Raum ${ubDetails.room}`;
         
-        // Organizer = Portal-Absender
         const organizer = { 
             name: userName, 
-            email: transportInfo.from 
+            email: transportInfo ? transportInfo.from : 'mail@schule.de'
         };
-        
-        // Attendee = Schulleitungsmitglied
         const attendee = (slEmail && slEmail.trim()) ? { name: slName, email: slEmail } : null;
-        
         icsContent = await generateICS(title, description, location, ubDetails.date_time, organizer, attendee, eventUid);
     } catch (err) {
         console.error('[MAIL-ERROR] Fehler beim Generieren der ICS-Datei:', err);
     }
 
-    // 2. Mail an Schulleitungsmitglied
-    const slSubject = `Begleitung Unterrichtsbesuch: ${ubDetails.subject} (${ubDetails.grade}) - ${userName}`;
-    const slText = `Hallo ${slName},
+    const variables = {
+        user_name: userName,
+        user_email: userEmail,
+        sl_name: slName,
+        sl_email: slEmail,
+        subject: ubDetails.subject,
+        grade: ubDetails.grade,
+        room: ubDetails.room,
+        type: ubDetails.type,
+        instructor: ubDetails.instructor || 'Nicht angegeben',
+        module: ubDetails.module || 'Nicht angegeben',
+        date_time: dateFormatted
+    };
 
-du wurdest als Begleitung für den folgenden Unterrichtsbesuch eingetragen bzw. hast diesen übernommen:
-
-Lehrkraft: ${userName}
-Datum/Uhrzeit: ${dateFormatted}
-Raum: ${ubDetails.room}
-Fach: ${ubDetails.subject}
-Klasse: ${ubDetails.grade}
-Art: ${ubDetails.type}
-Fachleiter: ${ubDetails.instructor || 'Nicht angegeben'}
-Modul: ${ubDetails.module || 'Nicht angegeben'}
-
-Freundliche Grüße,
-Dein Unterrichtsbesuchs-Portal`;
-
-    const slHtmlContent = `
-        <p>du wurdest als Begleitung für den folgenden Termin eingetragen bzw. hast diesen übernommen:</p>
-        <div class="details-box">
-            <div class="details-row"><div class="details-label">Lehrkraft:</div><div class="details-value">${userName}</div></div>
-            <div class="details-row"><div class="details-label">Termin:</div><div class="details-value">${dateFormatted} Uhr</div></div>
-            <div class="details-row"><div class="details-label">Fach:</div><div class="details-value">${ubDetails.subject}</div></div>
-            <div class="details-row"><div class="details-label">Klasse:</div><div class="details-value">${ubDetails.grade}</div></div>
-            <div class="details-row"><div class="details-label">Raum:</div><div class="details-value">${ubDetails.room}</div></div>
-            <div class="details-row"><div class="details-label">Art:</div><div class="details-value">${ubDetails.type}</div></div>
-            <div class="details-row"><div class="details-label">Fachleiter:</div><div class="details-value">${ubDetails.instructor || 'Nicht angegeben'}</div></div>
-            <div class="details-row"><div class="details-label">Modul:</div><div class="details-value">${ubDetails.module || 'Nicht angegeben'}</div></div>
-        </div>
-        <p>Outlook, Gmail und andere Clients sollten Ihnen diesen Termin direkt oben als interaktive Kalendereinladung (Zusagen/Ablehnen) anzeigen.</p>
-        <p>Freundliche Grüße,<br>Dein Unterrichtsbesuchs-Portal</p>
-    `;
-
-    const slHtml = getHtmlTemplate('Terminbegleitung zugewiesen', slName, slHtmlContent);
-
-    // 3. Mail an Benutzer
-    const userSubject = `Begleitung für deinen Unterrichtsbesuch am ${new Date(ubDetails.date_time).toLocaleDateString('de-DE')}`;
-    const userText = `Hallo ${userName},
-
-dein Unterrichtsbesuch am ${dateFormatted} im Fach ${ubDetails.subject} (Klasse ${ubDetails.grade}) wird begleitet von:
-
-Name: ${slName}
-E-Mail: ${slEmail}
-
-Bitte stelle sicher, dass du deinen Unterrichtsentwurf (PDF) rechtzeitig im Portal hochlädst.
-
-Freundliche Grüße,
-Dein Unterrichtsbesuchs-Portal`;
-
-    const userHtmlContent = `
-        <p>dein Unterrichtsbesuch wird begleitet von:</p>
-        <div class="details-box">
-            <div class="details-row"><div class="details-label">Begleitung:</div><div class="details-value"><strong>${slName}</strong> (${slEmail})</div></div>
-            <div class="details-row"><div class="details-label">Termin:</div><div class="details-value">${dateFormatted} Uhr</div></div>
-            <div class="details-row"><div class="details-label">Fach:</div><div class="details-value">${ubDetails.subject}</div></div>
-            <div class="details-row"><div class="details-label">Klasse:</div><div class="details-value">${ubDetails.grade}</div></div>
-            <div class="details-row"><div class="details-label">Raum:</div><div class="details-value">${ubDetails.room}</div></div>
-        </div>
-        <p>Bitte stelle sicher, dass du deinen Unterrichtsentwurf (PDF) rechtzeitig im Portal hochlädst.</p>
-        <p>Freundliche Grüße,<br>Dein Unterrichtsbesuchs-Portal</p>
-    `;
-
-    const userHtml = getHtmlTemplate('Begleitung für Unterrichtsbesuch', userName, userHtmlContent);
-
-    // SICHERHEITSPRÜFUNGEN VOR VERSAND
+    // Mail an Schulleitung (mit iCal REQUEST)
     if (slEmail && slEmail.trim()) {
         try {
-            const slMailConfig = {
-                from: transportInfo.from,
-                to: slEmail,
-                subject: slSubject,
-                text: slText,
-                html: slHtml
-            };
+            const renderedSl = await renderTemplate('ub_assigned_sl', {
+                ...variables,
+                recipient_name: slName,
+                recipient_email: slEmail
+            });
 
-            if (icsContent) {
-                console.log('[MAIL-DEBUG] Füge icalEvent (REQUEST) zur Schulleiter-Mail hinzu...');
-                slMailConfig.icalEvent = {
-                    method: 'REQUEST',
-                    content: icsContent
+            if (transportInfo) {
+                const slMailConfig = {
+                    from: transportInfo.from,
+                    to: slEmail,
+                    subject: renderedSl.subject,
+                    text: renderedSl.plainText,
+                    html: renderedSl.fullHtml
                 };
-            }
 
-            console.log(`[MAIL-DEBUG] Sende Zuweisungs-Mail an Schulleitung: ${slEmail}...`);
-            await transportInfo.transporter.sendMail(slMailConfig);
-            console.log(`[MAIL-SUCCESS] E-Mail "Begleitung zugewiesen" erfolgreich an Schulleitung (${slEmail}) gesendet.`);
+                if (icsContent) {
+                    slMailConfig.icalEvent = {
+                        method: 'REQUEST',
+                        content: icsContent
+                    };
+                }
+
+                await transportInfo.transporter.sendMail(slMailConfig);
+                console.log(`[MAIL-SUCCESS] Zuweisungs-Mail an Schulleitung (${slEmail}) gesendet.`);
+            } else {
+                console.log(`[SIMULATION MAIL] Zuweisungs-Mail an SL: ${slEmail}`);
+            }
         } catch (err) {
-            console.error(`[MAIL-ERROR] Detail-Fehler beim Senden an Schulleitung (${slEmail}):`, err);
+            console.error(`[MAIL-ERROR] Fehler beim Senden an Schulleitung (${slEmail}):`, err);
         }
-    } else {
-        console.warn(`[MAIL-WARN] Keine Benachrichtigung an Schulleitung gesendet: Keine E-Mail-Adresse für Schulleiter "${slName}" vorhanden.`);
     }
 
+    // Mail an LiV
     if (userEmail && userEmail.trim()) {
         try {
-            console.log(`[MAIL-DEBUG] Sende Zuweisungs-Mail an Lehrkraft: ${userEmail}...`);
-            await transportInfo.transporter.sendMail({
-                from: transportInfo.from,
-                to: userEmail,
-                subject: userSubject,
-                text: userText,
-                html: userHtml
+            const renderedLiv = await renderTemplate('ub_assigned_liv', {
+                ...variables,
+                recipient_name: userName,
+                recipient_email: userEmail
             });
-            console.log(`[MAIL-SUCCESS] E-Mail "Begleitungs-Info" erfolgreich an Benutzer (${userEmail}) gesendet.`);
+
+            if (transportInfo) {
+                await transportInfo.transporter.sendMail({
+                    from: transportInfo.from,
+                    to: userEmail,
+                    subject: renderedLiv.subject,
+                    text: renderedLiv.plainText,
+                    html: renderedLiv.fullHtml
+                });
+                console.log(`[MAIL-SUCCESS] Begleitungs-Info an Lehrkraft (${userEmail}) gesendet.`);
+            } else {
+                console.log(`[SIMULATION MAIL] Begleitungs-Info an LiV: ${userEmail}`);
+            }
         } catch (err) {
-            console.error(`[MAIL-ERROR] Detail-Fehler beim Senden an Benutzer (${userEmail}):`, err);
+            console.error(`[MAIL-ERROR] Fehler beim Senden an Lehrkraft (${userEmail}):`, err);
         }
-    } else {
-        console.warn(`[MAIL-WARN] Keine Benachrichtigung an Benutzer gesendet: Keine E-Mail-Adresse für Lehrkraft "${userName}" vorhanden.`);
     }
 }
 
@@ -379,151 +529,94 @@ Dein Unterrichtsbesuchs-Portal`;
  * Sendet E-Mails bei Absage eines Unterrichtsbesuchs.
  */
 async function sendUBCancelledMails(userEmail, userName, slEmail, slName, ubDetails) {
-    console.log(`[MAIL-DEBUG] sendUBCancelledMails aufgerufen:
-    - Lehrkraft: "${userName}" <${userEmail}>
-    - Schulleitung: "${slName}" <${slEmail}>
-    - UB-ID: ${ubDetails.id}, Fach: ${ubDetails.subject}`);
-
     const transportInfo = await getTransporter();
-    if (!transportInfo) {
-        console.log(`[SIMULATION MAIL] Absage an Benutzer: ${userEmail}\n---`);
-        if (slEmail) {
-            console.log(`[SIMULATION MAIL] Absage an Schulleitung: ${slEmail}\n---`);
-        }
-        return;
-    }
-    
-    const dateFormatted = new Date(ubDetails.date_time).toLocaleString('de-DE', {
-        day: '2-digit', month: '2-digit', year: 'numeric',
-        hour: '2-digit', minute: '2-digit'
-    });
+    const dateFormatted = formatDate(ubDetails.date_time);
+    const eventUid = `ub-event-${ubDetails.id}@${(transportInfo ? transportInfo.from.split('@')[1] : 'ubportal.local') || 'ubportal.local'}`;
 
-    const subjectText = `ABGESAGT: ${ubDetails.type} am ${dateFormatted} - ${userName}`;
+    const variables = {
+        user_name: userName,
+        user_email: userEmail,
+        sl_name: slName || 'Nicht zugewiesen',
+        sl_email: slEmail || '',
+        subject: ubDetails.subject,
+        grade: ubDetails.grade,
+        room: ubDetails.room,
+        type: ubDetails.type,
+        date_time: dateFormatted
+    };
 
-    // 1. Mail an den Benutzer (Bestätigung der Absage)
-    const userText = `Hallo ${userName},
-
-dein Unterrichtsbesuch am ${dateFormatted} im Fach ${ubDetails.subject} (Klasse ${ubDetails.grade}) wurde erfolgreich abgesagt.
-
-Details zum abgesagten Termin:
-- Raum: ${ubDetails.room}
-- Art: ${ubDetails.type}
-
-Freundliche Grüße,
-Dein Unterrichtsbesuchs-Portal`;
-
-    const userHtmlContent = `
-        <p>dein Unterrichtsbesuch wurde erfolgreich im System abgesagt.</p>
-        <div class="details-box" style="border-left-color: #e53e3e;">
-            <div class="details-row"><div class="details-label">Termin:</div><div class="details-value">${dateFormatted} Uhr</div></div>
-            <div class="details-row"><div class="details-label">Fach:</div><div class="details-value">${ubDetails.subject}</div></div>
-            <div class="details-row"><div class="details-label">Klasse:</div><div class="details-value">${ubDetails.grade}</div></div>
-            <div class="details-row"><div class="details-label">Art:</div><div class="details-value">${ubDetails.type}</div></div>
-        </div>
-        <p>Freundliche Grüße,<br>Dein Unterrichtsbesuchs-Portal</p>
-    `;
-
-    const userHtml = getHtmlTemplate('Unterrichtsbesuch abgesagt', userName, userHtmlContent, true);
-
-    // 2. Mail an Schulleitung (falls zugeordnet)
-    let slText = '';
-    let slHtml = '';
-    let cancelIcs = '';
-    
-    if (slEmail && slEmail.trim() && slName) {
-        slText = `Hallo ${slName},
-
-der folgende Unterrichtsbesuch, den du begleiten solltest, wurde von der Lehrkraft abgesagt:
-
-Lehrkraft: ${userName}
-Datum/Uhrzeit: ${dateFormatted}
-Fach: ${ubDetails.subject}
-Klasse: ${ubDetails.grade}
-Art: ${ubDetails.type}
-
-Der Termin wurde in deinem Kalender-Workflow storniert.
-
-Freundliche Grüße,
-Dein Unterrichtsbesuchs-Portal`;
-
-        const slHtmlContent = `
-            <p>der folgende Termin, für den du als Begleitung eingetragen warst, wurde von der Lehrkraft abgesagt:</p>
-            <div class="details-box" style="border-left-color: #e53e3e;">
-                <div class="details-row"><div class="details-label">Lehrkraft:</div><div class="details-value">${userName}</div></div>
-                <div class="details-row"><div class="details-label">Termin:</div><div class="details-value">${dateFormatted} Uhr</div></div>
-                <div class="details-row"><div class="details-label">Fach:</div><div class="details-value">${ubDetails.subject}</div></div>
-                <div class="details-row"><div class="details-label">Klasse:</div><div class="details-value">${ubDetails.grade}</div></div>
-                <div class="details-row"><div class="details-label">Art:</div><div class="details-value">${ubDetails.type}</div></div>
-            </div>
-            <p>Der Termin ist für Sie storniert.</p>
-            <p>Freundliche Grüße,<br>Dein Unterrichtsbesuchs-Portal</p>
-        `;
-
-        slHtml = getHtmlTemplate('HINWEIS: Begleitung abgesagt', slName, slHtmlContent, true);
-
-        // Identische UID wie bei der Zuweisung verwenden!
-        const eventUid = `ub-event-${ubDetails.id}@${transportInfo.from.split('@')[1] || 'ubportal.local'}`;
-        console.log(`[MAIL-DEBUG] Generiere Stornierungs-iCal mit UID: ${eventUid}`);
-
-        try {
-            const title = `ABGESAGT: ${ubDetails.type}: ${ubDetails.subject} - ${userName}`;
-            const description = `Dieser Termin wurde abgesagt.`;
-            const location = `Raum ${ubDetails.room}`;
-            
-            const organizer = { 
-                name: userName, 
-                email: transportInfo.from 
-            };
-            const attendee = { name: slName, email: slEmail };
-            
-            // iCal mit identischer UID wie beim Eintragen erzeugen!
-            const icsCancelContent = await generateICS(title, description, location, ubDetails.date_time, organizer, attendee, eventUid);
-            cancelIcs = icsCancelContent.replace('METHOD:REQUEST', 'METHOD:CANCEL').replace('STATUS:CONFIRMED', 'STATUS:CANCELLED');
-        } catch (icsErr) {
-            console.error('[MAIL-ERROR] Fehler bei Stornierungs-ICS-Generierung:', icsErr);
-        }
-    }
-
-    // SICHERHEITSPRÜFUNGEN VOR VERSAND
+    // Mail an LiV (Absagebestätigung)
     if (userEmail && userEmail.trim()) {
         try {
-            console.log(`[MAIL-DEBUG] Sende Absage-Bestätigung an Lehrkraft: ${userEmail}...`);
-            await transportInfo.transporter.sendMail({
-                from: transportInfo.from,
-                to: userEmail,
-                subject: `Bestätigung: Unterrichtsbesuch abgesagt am ${dateFormatted}`,
-                text: userText,
-                html: userHtml
+            const renderedLiv = await renderTemplate('ub_cancelled_liv', {
+                ...variables,
+                recipient_name: userName,
+                recipient_email: userEmail
             });
-            console.log(`[MAIL-SUCCESS] Absage-E-Mail erfolgreich an Benutzer (${userEmail}) gesendet.`);
+
+            if (transportInfo) {
+                await transportInfo.transporter.sendMail({
+                    from: transportInfo.from,
+                    to: userEmail,
+                    subject: renderedLiv.subject,
+                    text: renderedLiv.plainText,
+                    html: renderedLiv.fullHtml
+                });
+                console.log(`[MAIL-SUCCESS] Absage-Bestätigung an Lehrkraft (${userEmail}) gesendet.`);
+            } else {
+                console.log(`[SIMULATION MAIL] Absage an LiV: ${userEmail}`);
+            }
         } catch (err) {
-            console.error(`[MAIL-ERROR] Fehler beim Senden der Absage an Benutzer (${userEmail}):`, err);
+            console.error(`[MAIL-ERROR] Fehler beim Senden der Absage an Lehrkraft (${userEmail}):`, err);
         }
-    } else {
-        console.warn(`[MAIL-WARN] Keine Absage-Bestätigung an Benutzer gesendet: Keine E-Mail-Adresse für ${userName} vorhanden.`);
     }
 
+    // Mail an Schulleitung (mit iCal CANCEL)
     if (slEmail && slEmail.trim() && slName) {
         try {
-            const mailConfig = {
-                from: transportInfo.from,
-                to: slEmail,
-                subject: `ABGESAGT: Begleitung Unterrichtsbesuch ${userName}`,
-                text: slText,
-                html: slHtml
-            };
-            
-            if (cancelIcs) {
-                console.log('[MAIL-DEBUG] Füge icalEvent (CANCEL) zur Schulleiter-Absage hinzu...');
-                mailConfig.icalEvent = {
-                    method: 'CANCEL',
-                    content: cancelIcs
+            let cancelIcs = '';
+            try {
+                const title = `ABGESAGT: ${ubDetails.type}: ${ubDetails.subject} - ${userName}`;
+                const description = `Dieser Termin wurde abgesagt.`;
+                const location = `Raum ${ubDetails.room}`;
+                const organizer = { 
+                    name: userName, 
+                    email: transportInfo ? transportInfo.from : 'mail@schule.de'
                 };
+                const attendee = { name: slName, email: slEmail };
+                const icsCancelContent = await generateICS(title, description, location, ubDetails.date_time, organizer, attendee, eventUid);
+                cancelIcs = icsCancelContent.replace('METHOD:REQUEST', 'METHOD:CANCEL').replace('STATUS:CONFIRMED', 'STATUS:CANCELLED');
+            } catch (icsErr) {
+                console.error('[MAIL-ERROR] Fehler bei Stornierungs-ICS-Generierung:', icsErr);
             }
 
-            console.log(`[MAIL-DEBUG] Sende Absage-Benachrichtigung an Schulleitung: ${slEmail}...`);
-            await transportInfo.transporter.sendMail(mailConfig);
-            console.log(`[MAIL-SUCCESS] Absage-E-Mail erfolgreich an Schulleitung (${slEmail}) gesendet.`);
+            const renderedSl = await renderTemplate('ub_cancelled_sl', {
+                ...variables,
+                recipient_name: slName,
+                recipient_email: slEmail
+            });
+
+            if (transportInfo) {
+                const mailConfig = {
+                    from: transportInfo.from,
+                    to: slEmail,
+                    subject: renderedSl.subject,
+                    text: renderedSl.plainText,
+                    html: renderedSl.fullHtml
+                };
+
+                if (cancelIcs) {
+                    mailConfig.icalEvent = {
+                        method: 'CANCEL',
+                        content: cancelIcs
+                    };
+                }
+
+                await transportInfo.transporter.sendMail(mailConfig);
+                console.log(`[MAIL-SUCCESS] Absage-E-Mail mit Storno-iCal an Schulleitung (${slEmail}) gesendet.`);
+            } else {
+                console.log(`[SIMULATION MAIL] Absage an SL: ${slEmail}`);
+            }
         } catch (err) {
             console.error(`[MAIL-ERROR] Fehler beim Senden der Absage an Schulleitung (${slEmail}):`, err);
         }
@@ -531,7 +624,13 @@ Dein Unterrichtsbesuchs-Portal`;
 }
 
 module.exports = {
+    getTransporter,
+    renderTemplate,
+    sendTestMail,
     sendUBSubmittedMail,
+    sendDraftReminderMail,
+    sendUnassignedSLReminderMail,
+    sendUpcomingSLReminderMail,
     sendUBAssignedMails,
     sendUBCancelledMails
 };

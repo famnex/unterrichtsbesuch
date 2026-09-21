@@ -633,3 +633,19 @@ textarea {
         padding: 0 20px;
     }
 }
+
+.placeholder-pill {
+    cursor: pointer;
+    background: hsla(250, 84%, 67%, 0.15);
+    color: var(--primary);
+    border: 1px solid hsla(250, 84%, 67%, 0.3);
+    transition: var(--transition-smooth);
+    user-select: none;
+}
+
+.placeholder-pill:hover {
+    background: var(--primary);
+    color: #ffffff;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px hsla(250, 84%, 67%, 0.4);
+}

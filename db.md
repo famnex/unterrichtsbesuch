@@ -77,6 +77,9 @@ Speichert die geplanten und durchgeführten Unterrichtsbesuche.
 | `user_id` | TEXT | Fremdschlüssel auf `users.id` (Ersteller des UBs) |
 | `assigned_schulleitung_id` | TEXT | Fremdschlüssel auf `users.id` (Begleitendes Schulleitungsmitglied, optional) |
 | `status` | TEXT | Aktueller Status: `draft` (Entwurf), `submitted` (Eingereicht), `cancelled` (Abgesagt), `archived` (Archiviert) |
+| `reminded_draft_liv` | INTEGER | Flag `1`, wenn Erinnerung c (Fehlender Entwurf am Vortag 9 Uhr an LiV) gesendet wurde |
+| `reminded_unassigned_sl` | INTEGER | Flag `1`, wenn Erinnerung d (Nicht zugewiesener UB am Vortag 9 Uhr an SL) gesendet wurde |
+| `reminded_upcoming_sl` | INTEGER | Flag `1`, wenn Erinnerung e (Terminerinnerung am Vortag 10 Uhr an zugewiesene SL) gesendet wurde |
 | `created_at` | TEXT | Erstellungszeitstempel |
 | `updated_at` | TEXT | Letzter Änderungszeitstempel |
 
@@ -94,6 +97,9 @@ CREATE TABLE IF NOT EXISTS unterrichtsbesuche (
     user_id TEXT NOT NULL,
     assigned_schulleitung_id TEXT,
     status TEXT DEFAULT 'draft',
+    reminded_draft_liv INTEGER DEFAULT 0,
+    reminded_unassigned_sl INTEGER DEFAULT 0,
+    reminded_upcoming_sl INTEGER DEFAULT 0,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(user_id) REFERENCES users(id),
@@ -101,7 +107,29 @@ CREATE TABLE IF NOT EXISTS unterrichtsbesuche (
 );
 ```
 
+### 4. `mail_templates`
+Speichert anpassbare E-Mail-Vorlagen mit HTML-Inhalt und Platzhaltern für das gesamte Benachrichtigungssystem.
+
+| Spalte | Typ | Beschreibung |
+| :--- | :--- | :--- |
+| `id` | TEXT PRIMARY KEY | Eindeutige Kennung der Vorlage (z.B. `ub_created_sl`, `ub_created_liv`, `reminder_draft_liv`, `reminder_unassigned_sl`, `reminder_upcoming_sl`, `ub_assigned_sl`, `ub_assigned_liv`, `ub_cancelled_liv`, `ub_cancelled_sl`) |
+| `title` | TEXT | Lesbarer Titel der E-Mail-Vorlage |
+| `subject` | TEXT | E-Mail-Betreffzeile (mit Platzhaltern) |
+| `body_html` | TEXT | HTML-Textkörper der E-Mail (mit Platzhaltern) |
+| `description` | TEXT | Beschreibung des Auslösezeitpunkts und der verfügbaren Platzhalter |
+
+```sql
+CREATE TABLE IF NOT EXISTS mail_templates (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    body_html TEXT NOT NULL,
+    description TEXT
+);
+```
+
 ## Änderungen und Historie
 - **2026-07-17:** Initiale Tabellenstruktur definiert. Feld `jwt_secret` zu `settings` hinzugefügt.
 - **2026-07-17 (Update 2):** Feld `logout_redirect_url` zur Tabelle `settings` hinzugefügt.
 - **2026-07-17 (Update 3):** Status `cancelled` (Abgesagt) für Unterrichtsbesuche dokumentiert.
+- **2026-09-21:** Tabelle `mail_templates` hinzugefügt. Spalten `reminded_draft_liv`, `reminded_unassigned_sl` und `reminded_upcoming_sl` in Tabelle `unterrichtsbesuche` integriert.

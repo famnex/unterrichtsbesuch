@@ -4,8 +4,14 @@ const jwt = require('jsonwebtoken');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
-const { getDatabase } = require('./db');
-const { sendUBSubmittedMail, sendUBAssignedMails, sendUBCancelledMails } = require('./mailer');
+const { getDatabase, DEFAULT_TEMPLATES } = require('./db');
+const { 
+    sendTestMail,
+    sendUBSubmittedMail, 
+    sendUBAssignedMails, 
+    sendUBCancelledMails 
+} = require('./mailer');
+const { startScheduler } = require('./scheduler');
 
 const app = express();
 const PORT = process.env.PORT || 3022;
@@ -267,6 +273,90 @@ router.post('/api/settings', async (req, res, next) => {
     ]);
 
     res.json({ message: 'Einstellungen erfolgreich gespeichert.' });
+});
+
+// API: Test-E-Mail senden (nur Admin)
+router.post('/api/settings/test-mail', authMiddleware, async (req, res) => {
+    if (req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Nur Administratoren dürfen Test-E-Mails versenden.' });
+    }
+    const { to } = req.body;
+    const targetEmail = to || req.user.email;
+
+    if (!targetEmail) {
+        return res.status(400).json({ error: 'Bitte geben Sie eine Empfänger-E-Mail-Adresse an.' });
+    }
+
+    try {
+        await sendTestMail(targetEmail);
+        res.json({ success: true, message: `Test-E-Mail erfolgreich an ${targetEmail} gesendet!` });
+    } catch (err) {
+        console.error('[TEST-MAIL-ERROR]', err);
+        res.status(500).json({ error: `Fehler beim Senden der Test-E-Mail: ${err.message}` });
+    }
+});
+
+// API: Alle E-Mail-Vorlagen abrufen (nur Admin)
+router.get('/api/mail-templates', authMiddleware, async (req, res) => {
+    if (req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Nur Administratoren dürfen Vorlagen einsehen.' });
+    }
+    const db = await getDatabase();
+    const templates = await db.all('SELECT * FROM mail_templates ORDER BY id ASC');
+    res.json(templates);
+});
+
+// API: Einzelne E-Mail-Vorlage abrufen (nur Admin)
+router.get('/api/mail-templates/:id', authMiddleware, async (req, res) => {
+    if (req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Keine Berechtigung.' });
+    }
+    const db = await getDatabase();
+    const template = await db.get('SELECT * FROM mail_templates WHERE id = ?', [req.params.id]);
+    if (!template) {
+        return res.status(404).json({ error: 'Vorlage nicht gefunden.' });
+    }
+    res.json(template);
+});
+
+// API: E-Mail-Vorlage aktualisieren (nur Admin)
+router.put('/api/mail-templates/:id', authMiddleware, async (req, res) => {
+    if (req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Keine Berechtigung.' });
+    }
+    const { subject, body_html } = req.body;
+    if (!subject || !body_html) {
+        return res.status(400).json({ error: 'Betreff und E-Mail-Inhalt dürfen nicht leer sein.' });
+    }
+
+    const db = await getDatabase();
+    await db.run(
+        'UPDATE mail_templates SET subject = ?, body_html = ? WHERE id = ?',
+        [subject, body_html, req.params.id]
+    );
+
+    const updated = await db.get('SELECT * FROM mail_templates WHERE id = ?', [req.params.id]);
+    res.json(updated);
+});
+
+// API: E-Mail-Vorlage auf Standard zurücksetzen (nur Admin)
+router.post('/api/mail-templates/:id/reset', authMiddleware, async (req, res) => {
+    if (req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Keine Berechtigung.' });
+    }
+    const defaultTemplate = DEFAULT_TEMPLATES.find(t => t.id === req.params.id);
+    if (!defaultTemplate) {
+        return res.status(404).json({ error: 'Keine Standard-Vorlage für diese ID hinterlegt.' });
+    }
+
+    const db = await getDatabase();
+    await db.run(
+        'UPDATE mail_templates SET title = ?, subject = ?, body_html = ?, description = ? WHERE id = ?',
+        [defaultTemplate.title, defaultTemplate.subject, defaultTemplate.body_html, defaultTemplate.description, req.params.id]
+    );
+
+    const updated = await db.get('SELECT * FROM mail_templates WHERE id = ?', [req.params.id]);
+    res.json(updated);
 });
 
 // API: Benutzer auflisten (nur Admin)
@@ -640,4 +730,5 @@ app.get(BASE_PATH, (req, res) => {
 // Start des Servers
 app.listen(PORT, () => {
     console.log(`Server läuft auf http://localhost:${PORT}${BASE_PATH}`);
+    startScheduler();
 });
