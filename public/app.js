@@ -796,7 +796,7 @@ function renderSLDashboard() {
             
         tbody.innerHTML = `
             <tr>
-                <td colspan="9" style="text-align: center; color: var(--text-secondary); padding: 40px;">
+                <td colspan="8" style="text-align: center; color: var(--text-secondary); padding: 40px;">
                     <i data-lucide="inbox" style="width: 48px; height: 48px; margin-bottom: 12px; display: inline-block;"></i>
                     <p>${emptyMsg}</p>
                 </td>
@@ -819,50 +819,69 @@ function renderSLDashboard() {
         });
 
         // Entwurfs-Link
-        let pdfLink = '<span class="text-muted">Kein Entwurf</span>';
+        let pdfLink = '<span class="text-muted" style="font-size: 0.85rem;">Kein Entwurf</span>';
         if (ub.file_path) {
-            pdfLink = `<a href="${BASE_PATH}/${ub.file_path}" target="_blank" class="btn btn-secondary btn-icon" title="PDF Entwurf öffnen">
-                <i data-lucide="file-text"></i> PDF
+            pdfLink = `<a href="${BASE_PATH}/${ub.file_path}" target="_blank" class="btn btn-secondary btn-icon" title="PDF-Entwurf öffnen">
+                <i data-lucide="file-text"></i>
             </a>`;
         }
 
-        // Begleitungs-Auswahl (nur wenn nicht abgesagt und nicht im Archiv)
-        let slDropdown = '';
+        // Begleitung: Name oder Status (kein Dropdown mehr)
+        let slDisplay = '';
         if (ub.status === 'cancelled') {
-            slDropdown = `<span class="badge status-cancelled">Abgesagt</span>`;
-        } else if (slActiveTab === 'archived') {
-            slDropdown = ub.assigned_sl_name ? `<span>${ub.assigned_sl_name}</span>` : `<span class="text-muted">Keine Begleitung</span>`;
+            slDisplay = `<span class="badge status-cancelled">Abgesagt</span>`;
+        } else if (ub.assigned_sl_name) {
+            const isMe = ub.assigned_schulleitung_id === currentUser?.id;
+            slDisplay = `<strong style="${isMe ? 'color: var(--primary);' : ''}">${ub.assigned_sl_name}${isMe ? ' (Ich)' : ''}</strong>`;
         } else {
-            slDropdown = `<select onchange="assignSL(${ub.id}, this.value)" style="width: 100%;">
-                <option value="">-- Nicht zugeordnet --</option>`;
-            
-            slMembers.forEach(sl => {
-                const selected = ub.assigned_schulleitung_id === sl.id ? 'selected' : '';
-                slDropdown += `<option value="${sl.id}" ${selected}>${sl.display_name}</option>`;
-            });
-            slDropdown += `</select>`;
+            slDisplay = `<span class="text-muted" style="font-style: italic; font-size: 0.9rem;">Noch offen</span>`;
         }
 
-        // Aktionen-Spalte
+        // Aktionen-Spalte: Reine Icon-Buttons ohne Text
         let actionsHtml = '';
         if (ub.status === 'cancelled') {
-            actionsHtml = `<span style="color: var(--danger); font-weight: 600;">Storniert</span>`;
+            actionsHtml = `<span style="color: var(--danger); font-weight: 600; font-size: 0.85rem;">Storniert</span>`;
         } else if (slActiveTab === 'archived') {
-            actionsHtml = `<span class="text-muted">Abgeschlossen</span>`;
+            actionsHtml = `<span class="text-muted" style="font-size: 0.85rem;">Abgeschlossen</span>`;
         } else {
-            const isAssignedToMe = ub.assigned_schulleitung_id === currentUser.id;
-            actionsHtml = isAssignedToMe ? 
-                `<button class="btn btn-secondary btn-icon" title="Zuordnung aufheben" onclick="assignSL(${ub.id}, '')">
-                    <i data-lucide="user-minus"></i> Freigeben
-                 </button>` :
-                `<button class="btn btn-primary" onclick="assignSL(${ub.id}, '${currentUser.id}')">
-                    <i data-lucide="user-plus"></i> Übernehmen
-                 </button>`;
+            const isAssignedToMe = ub.assigned_schulleitung_id === currentUser?.id;
+
+            if (isAssignedToMe) {
+                // Selbst zugewiesen: Freigeben oder Zuweisung ändern
+                actionsHtml = `
+                    <button class="btn btn-secondary btn-icon" title="Zuordnung aufheben / Freigeben" onclick="assignSL(${ub.id}, '')">
+                        <i data-lucide="user-minus"></i>
+                    </button>
+                    <button class="btn btn-secondary btn-icon" title="Andere Begleitung zuweisen" onclick="openAssignModal(${ub.id})">
+                        <i data-lucide="user-cog"></i>
+                    </button>
+                `;
+            } else if (ub.assigned_schulleitung_id) {
+                // Jemand anderem zugewiesen: Selbst übernehmen oder Zuweisung ändern
+                actionsHtml = `
+                    <button class="btn btn-secondary btn-icon" title="Selbst übernehmen" onclick="assignSL(${ub.id}, '${currentUser?.id}')">
+                        <i data-lucide="user-check"></i>
+                    </button>
+                    <button class="btn btn-secondary btn-icon" title="Begleitung ändern" onclick="openAssignModal(${ub.id})">
+                        <i data-lucide="user-cog"></i>
+                    </button>
+                `;
+            } else {
+                // Noch niemandem zugewiesen: Selbst übernehmen (primary) oder Zuweisung wählen
+                actionsHtml = `
+                    <button class="btn btn-primary btn-icon" title="Selbst übernehmen" onclick="assignSL(${ub.id}, '${currentUser?.id}')">
+                        <i data-lucide="user-plus"></i>
+                    </button>
+                    <button class="btn btn-secondary btn-icon" title="Begleitung zuweisen" onclick="openAssignModal(${ub.id})">
+                        <i data-lucide="user-cog"></i>
+                    </button>
+                `;
+            }
         }
 
-        if (currentUser.role === 'admin') {
+        if (currentUser?.role === 'admin') {
             actionsHtml += `
-                <button class="btn btn-danger btn-icon" style="margin-left: 8px;" onclick="deleteUb(${ub.id})" title="Dauerhaft löschen (lautlos)">
+                <button class="btn btn-danger btn-icon" onclick="deleteUb(${ub.id})" title="Dauerhaft löschen (lautlos)">
                     <i data-lucide="trash-2"></i>
                 </button>
             `;
@@ -871,18 +890,46 @@ function renderSLDashboard() {
         tr.innerHTML = `
             <td><strong>${ub.user_name || 'Unbekannt'}</strong><br><small>${ub.user_email || ''}</small></td>
             <td>${dateFormatted}</td>
-            <td><strong>${ub.subject}</strong><br><small>Klasse ${ub.grade}</small></td>
-            <td>${ub.room}</td>
+            <td><strong>${ub.subject}</strong><br><small>Klasse ${ub.grade} • Raum ${ub.room}</small></td>
             <td>${ub.type}</td>
-            <td>${ub.instructor || 'n.a.'}<br><small>${ub.module || ''}</small></td>
+            <td><strong>${ub.instructor || 'n.a.'}</strong><br><small>${ub.module || ''}</small></td>
             <td>${pdfLink}</td>
-            <td>${slDropdown}</td>
-            <td><div style="display: flex; align-items: center;">${actionsHtml}</div></td>
+            <td>${slDisplay}</td>
+            <td><div style="display: flex; align-items: center; gap: 6px;">${actionsHtml}</div></td>
         `;
 
         tbody.appendChild(tr);
     });
 
+    lucide.createIcons();
+}
+
+// Öffnet das Modal zum Zuweisen einer Terminbegleitung
+function openAssignModal(ubId) {
+    const ub = allSchoolUbs.find(item => item.id === ubId);
+    if (!ub) return;
+
+    const dateFormatted = new Date(ub.date_time).toLocaleString('de-DE', {
+        weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+    });
+
+    document.getElementById('assign-modal-ub-id').value = ub.id;
+    document.getElementById('assign-modal-details').innerHTML = `
+        <strong>${ub.type}: ${ub.subject} (${ub.grade})</strong><br>
+        <span style="color: var(--text-secondary);">Lehrkraft: ${ub.user_name} • ${dateFormatted} Uhr (Raum ${ub.room})</span>
+    `;
+
+    const select = document.getElementById('assign-modal-select');
+    select.innerHTML = '<option value="">-- Nicht zugeordnet (Freigeben) --</option>';
+
+    slMembers.forEach(sl => {
+        const isSelected = ub.assigned_schulleitung_id === sl.id ? 'selected' : '';
+        const isMe = sl.id === currentUser?.id ? ' (Ich)' : '';
+        select.innerHTML += `<option value="${sl.id}" ${isSelected}>${sl.display_name}${isMe}</option>`;
+    });
+
+    document.getElementById('assign-modal').classList.remove('hidden');
     lucide.createIcons();
 }
 
@@ -1381,15 +1428,35 @@ async function runSystemUpdate() {
     }
 }
 
+// Event-Listener für Zuweisungs-Modal
+function initAssignModalEvents() {
+    const modal = document.getElementById('assign-modal');
+    if (!modal) return;
+
+    document.getElementById('btn-close-assign-modal')?.addEventListener('click', () => modal.classList.add('hidden'));
+    document.getElementById('btn-cancel-assign-modal')?.addEventListener('click', () => modal.classList.add('hidden'));
+
+    document.getElementById('assign-modal-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const ubId = document.getElementById('assign-modal-ub-id').value;
+        const slId = document.getElementById('assign-modal-select').value;
+
+        modal.classList.add('hidden');
+        await assignSL(ubId, slId);
+    });
+}
+
 // Global registrieren für inline Event Handler
 window.openEditUbModal = openEditUbModal;
 window.submitUb = submitUb;
 window.cancelUb = cancelUb;
 window.openUploadModal = openUploadModal;
 window.assignSL = assignSL;
+window.openAssignModal = openAssignModal;
 window.deleteUb = deleteUb;
 window.openEditUserModal = openEditUserModal;
 
 // Start und Events
 initAdminEvents();
+initAssignModalEvents();
 initApp();
