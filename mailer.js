@@ -280,10 +280,10 @@ async function sendUBSubmittedMail(userEmail, userName, ubDetails) {
         }
     }
 
-    // a. Benachrichtigung an alle Schulleitungsmitglieder
+    // a. Benachrichtigung an alle Schulleitungsmitglieder (exklusive Administratoren)
     try {
         const db = await getDatabase();
-        const slUsers = await db.all("SELECT display_name, email FROM users WHERE (role = 'schulleitung' OR role = 'admin') AND email IS NOT NULL AND email != ''");
+        const slUsers = await db.all("SELECT display_name, email FROM users WHERE role = 'schulleitung' AND email IS NOT NULL AND email != ''");
         
         console.log(`[MAIL-DEBUG] Gefundene SL-Mitglieder für Benachrichtigung (a): ${slUsers.length}`);
 
@@ -349,12 +349,12 @@ async function sendDraftReminderMail(userEmail, userName, ubDetails) {
 }
 
 /**
- * d. Erinnerung an alle SL-Mitglieder, wenn der UB am Vortag (9:00 Uhr) noch nicht zugewiesen wurde.
+ * d. Erinnerung an alle SL-Mitglieder (exklusive Administratoren), wenn der UB am Vortag (9:00 Uhr) noch nicht zugewiesen wurde.
  */
 async function sendUnassignedSLReminderMail(userName, userEmail, ubDetails) {
     const transportInfo = await getTransporter();
     const db = await getDatabase();
-    const slUsers = await db.all("SELECT display_name, email FROM users WHERE (role = 'schulleitung' OR role = 'admin') AND email IS NOT NULL AND email != ''");
+    const slUsers = await db.all("SELECT display_name, email FROM users WHERE role = 'schulleitung' AND email IS NOT NULL AND email != ''");
     const dateFormatted = formatDate(ubDetails.date_time);
 
     console.log(`[MAIL-DEBUG] Sende Erinnerung nicht zugewiesener UB (d) an ${slUsers.length} SL-Mitglieder...`);
